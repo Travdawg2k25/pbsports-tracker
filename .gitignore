@@ -1,0 +1,42 @@
+# Model weights (large binaries — deployed to boxes separately)
+*.pt
+
+# Videos and media
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
+# Data, outputs, logs
+data/
+output/
+runs/
+*.log
+*.csv
+*.json
+
+# Job/scratch data
+_pbsync/
+_clip.mp4
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Training datasets (large — not part of deployed code)
+Basketball-and-rim-1/
+*.txt
+!requirements.txt
+New folder/
