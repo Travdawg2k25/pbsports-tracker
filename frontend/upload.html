@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Purple Box Sports — Upload Game</title>
+<link rel="icon" type="image/png" href="PBSportsNoWords.png">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+    background: linear-gradient(135deg, #1a0033 0%, #0d001a 100%); min-height: 100vh; color: #fff; }
+  .container { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+  .header { text-align: center; margin-bottom: 24px; }
+  .header img { height: 50px; margin-bottom: 12px; }
+  .header h1 { font-size: 28px; }
+  .header p { color: rgba(255,255,255,0.6); font-size: 14px; margin-top: 8px; }
+  .creditbar { text-align:center; margin-bottom: 28px; font-size: 14px; color:#FFB703; }
+  .creditbar a { color:#a259ff; }
+  .steps { display: flex; justify-content: center; gap: 24px; margin-bottom: 40px; }
+  .step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(255,255,255,0.4); }
+  .step.active { color: #FFB703; }
+  .step-num { width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,0.1);
+    display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
+  .step.active .step-num { background: #FFB703; color: #000; }
+  .step.done .step-num { background: #22c55e; color: #fff; }
+  .step.done { color: #22c55e; }
+  .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px; padding: 32px; margin-bottom: 24px; }
+  .card h2 { font-size: 20px; margin-bottom: 16px; }
+  .upload-area { border: 2px dashed rgba(255,183,3,0.4); border-radius: 12px; padding: 60px 20px;
+    text-align: center; cursor: pointer; transition: all 0.2s; }
+  .upload-area:hover { border-color: #FFB703; background: rgba(255,183,3,0.05); }
+  .upload-area.dragover { border-color: #FFB703; background: rgba(255,183,3,0.1); }
+  .upload-icon { font-size: 48px; margin-bottom: 12px; }
+  .upload-text { font-size: 16px; color: rgba(255,255,255,0.7); }
+  .upload-hint { font-size: 12px; color: rgba(255,255,255,0.4); margin-top: 8px; }
+  .upload-area input { display: none; }
+  .progress-bar { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px;
+    overflow: hidden; margin-top: 20px; display: none; }
+  .progress-fill { height: 100%; background: #FFB703; border-radius: 3px; transition: width 0.3s; width: 0%; }
+  .progress-text { text-align: center; font-size: 13px; color: rgba(255,255,255,0.6); margin-top: 8px; display: none; }
+  .player-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; margin-top: 20px; }
+  .player-card { background: rgba(255,255,255,0.05); border: 2px solid rgba(255,255,255,0.1);
+    border-radius: 12px; padding: 12px; text-align: center; cursor: pointer; transition: all 0.2s; }
+  .player-card:hover { border-color: rgba(255,183,3,0.5); }
+  .player-card.selected { border-color: #FFB703; background: rgba(255,183,3,0.1); }
+  .player-card img { width: 100%; height: 160px; object-fit: cover; border-radius: 8px; margin-bottom: 8px; }
+  .player-card .track-label { font-size: 11px; color: rgba(255,255,255,0.5); }
+  .form-row { display: flex; gap: 16px; margin-top: 20px; }
+  .form-group { flex: 1; }
+  .form-group label { display: block; font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px; color: rgba(255,255,255,0.6); margin-bottom: 6px; }
+  .form-group input { width: 100%; padding: 12px 16px; border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 8px; background: rgba(255,255,255,0.05); color: #fff; font-size: 14px; }
+  .form-group input:focus { outline: none; border-color: #FFB703; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; padding: 14px 28px;
+    border-radius: 10px; font-size: 15px; font-weight: 600; border: none; cursor: pointer; transition: all 0.2s; }
+  .btn-gold { background: #FFB703; color: #000; }
+  .btn-gold:hover { background: #e5a503; }
+  .btn-gold:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); }
+  .actions { display: flex; justify-content: space-between; align-items: center; margin-top: 24px; }
+  .status-card { text-align: center; padding: 60px 20px; }
+  .status-icon { font-size: 64px; margin-bottom: 16px; }
+  .status-title { font-size: 22px; margin-bottom: 8px; }
+  .status-desc { color: rgba(255,255,255,0.6); font-size: 14px; }
+  .hidden { display: none; }
+  @media (max-width: 600px) { .steps { flex-wrap: wrap; gap: 12px; } .form-row { flex-direction: column; }
+    .player-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <img src="PBSportsLogo.png" alt="Purple Box Sports">
+    <h1>Upload Game Film</h1>
+    <p>Upload your game, select your player, and get AI-powered stats &amp; highlights</p>
+  </div>
+
+  <div class="creditbar" id="creditbar">Checking your account…</div>
+
+  <div class="steps">
+    <div class="step active" id="step-ind-1"><span class="step-num">1</span> Upload Video</div>
+    <div class="step" id="step-ind-2"><span class="step-num">2</span> Select Player</div>
+    <div class="step" id="step-ind-3"><span class="step-num">3</span> Get Results</div>
+  </div>
+
+  <div class="card" id="step-upload">
+    <h2>📹 Upload Your Game Video</h2>
+    <div class="upload-area" id="upload-area">
+      <div class="upload-icon">🎬</div>
+      <div class="upload-text">Drop your video here or click to browse</div>
+      <div class="upload-hint">MP4, MOV, AVI — up to 5GB</div>
+      <input type="file" id="video-input" accept="video/*">
+    </div>
+    <div class="progress-bar" id="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+    <div class="progress-text" id="progress-text">Uploading… 0%</div>
+  </div>
+
+  <div class="card hidden" id="step-select">
+    <h2>👤 Select Your Player</h2>
+    <p style="color: rgba(255,255,255,0.6); font-size: 14px;">We detected these players. Tap the one you want to track.</p>
+    <div class="player-grid" id="player-grid"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Jersey Number</label><input type="text" id="jersey-input" placeholder="e.g. 23" maxlength="3"></div>
+      <div class="form-group"><label>Player Name</label><input type="text" id="name-input" placeholder="e.g. LeBron James"></div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="goToStep(1)">← Back</button>
+      <button class="btn btn-gold" id="analyze-btn" disabled onclick="startAnalysis()">🚀 Analyze Game</button>
+    </div>
+  </div>
+
+  <div class="card hidden" id="step-results">
+    <div class="status-card" id="processing-status">
+      <div class="status-icon">⚙️</div>
+      <div class="status-title">Analyzing Your Game…</div>
+      <div class="status-desc">Our AI is tracking your player, detecting events, and generating highlights.</div>
+      <div class="progress-bar" style="display:block; margin-top:24px;"><div class="progress-fill" id="analysis-progress" style="width: 0%"></div></div>
+      <div class="progress-text" style="display:block;" id="analysis-text">Starting analysis…</div>
+    </div>
+    <div class="status-card hidden" id="results-ready">
+      <div class="status-icon">🏆</div>
+      <div class="status-title">Analysis Complete!</div>
+      <div class="status-desc">Your player's stats and highlights are ready.</div>
+      <div id="results-body" style="margin-top:24px;"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_BASE = window.location.origin + '/api';
+const TOKEN = localStorage.getItem('pb_token');
+
+// ── Gate: must be logged in ─────────────────────────────────────────────────
+if (!TOKEN) {
+  // Not logged in — send them to the pricing/login page.
+  window.location.href = '/pricing.html?next=/upload.html';
+}
+
+function authHeaders(extra) {
+  return Object.assign({ 'Authorization': 'Bearer ' + TOKEN }, extra || {});
+}
+
+let selectedTrackId = null;
+let jobId = null;
+
+// ── Load account / credits ──────────────────────────────────────────────────
+async function loadAccount() {
+  try {
+    const res = await fetch(API_BASE + '/auth/me', { headers: authHeaders() });
+    if (res.status === 401) { localStorage.removeItem('pb_token'); window.location.href = '/pricing.html?next=/upload.html'; return; }
+    const me = await res.json();
+    const games = me.games_remaining ?? 0;
+    const bar = document.getElementById('creditbar');
+    if (games > 0) {
+      bar.innerHTML = `Signed in as <b>${me.email}</b> — <b>${games}</b> game ${games === 1 ? 'analysis' : 'analyses'} remaining`;
+    } else {
+      bar.innerHTML = `Signed in as <b>${me.email}</b> — <b>0</b> analyses left. <a href="/pricing.html">Buy a package →</a>`;
+      document.getElementById('video-input').disabled = true;
+    }
+  } catch (e) {
+    document.getElementById('creditbar').textContent = 'Could not load account.';
+  }
+}
+loadAccount();
+
+// ── Upload ──────────────────────────────────────────────────────────────────
+const uploadArea = document.getElementById('upload-area');
+const videoInput = document.getElementById('video-input');
+uploadArea.addEventListener('click', () => videoInput.click());
+uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+uploadArea.addEventListener('drop', (e) => {
+  e.preventDefault(); uploadArea.classList.remove('dragover');
+  if (e.dataTransfer.files.length) handleUpload(e.dataTransfer.files[0]);
+});
+videoInput.addEventListener('change', (e) => { if (e.target.files.length) handleUpload(e.target.files[0]); });
+
+function handleUpload(file) {
+  const bar = document.getElementById('progress-bar');
+  const fill = document.getElementById('progress-fill');
+  const text = document.getElementById('progress-text');
+  bar.style.display = 'block'; text.style.display = 'block';
+  text.textContent = `Uploading ${file.name}… 0%`;
+
+  const formData = new FormData();
+  formData.append('file', file);   // backend expects field name 'file'
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', API_BASE + '/games/upload');
+  xhr.setRequestHeader('Authorization', 'Bearer ' + TOKEN);
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) {
+      const pct = Math.round((e.loaded / e.total) * 100);
+      fill.style.width = pct + '%';
+      text.textContent = `Uploading ${file.name}… ${pct}%`;
+    }
+  };
+  xhr.onload = () => {
+    if (xhr.status === 200) {
+      const data = JSON.parse(xhr.responseText);
+      jobId = data.job_id;
+      text.textContent = 'Upload complete! Detecting players…';
+      detectPlayers();
+    } else if (xhr.status === 401) {
+      localStorage.removeItem('pb_token'); window.location.href = '/pricing.html?next=/upload.html';
+    } else if (xhr.status === 402) {
+      text.textContent = 'No analyses remaining. Please purchase a package.';
+    } else {
+      let msg = 'Upload failed.';
+      try { msg = JSON.parse(xhr.responseText).detail || msg; } catch (e) {}
+      text.textContent = msg;
+    }
+  };
+  xhr.onerror = () => { text.textContent = 'Upload failed (network error).'; };
+  xhr.send(formData);
+}
+
+async function detectPlayers() {
+  try {
+    await fetch(API_BASE + `/games/${jobId}/detect-players`, { method: 'POST', headers: authHeaders() });
+    pollForPlayers();
+  } catch (err) {
+    document.getElementById('progress-text').textContent = 'Detection failed: ' + err.message;
+  }
+}
+
+async function pollForPlayers() {
+  const text = document.getElementById('progress-text');
+  const iv = setInterval(async () => {
+    try {
+      const res = await fetch(API_BASE + `/games/${jobId}/players`, { headers: authHeaders() });
+      const data = await res.json();
+      if (data.status === 'selecting' && data.players && data.players.length) {
+        clearInterval(iv);
+        renderPlayerGrid(data.players);
+        goToStep(2);
+      } else if (data.status === 'failed') {
+        clearInterval(iv); text.textContent = 'Player detection failed.';
+      } else {
+        text.textContent = 'Detecting players… (' + (data.status || 'working') + ')';
+      }
+    } catch (e) { /* keep polling */ }
+  }, 5000);
+}
+
+function renderPlayerGrid(players) {
+  const grid = document.getElementById('player-grid');
+  grid.innerHTML = '';
+  players.forEach(p => {
+    const card = document.createElement('div');
+    card.className = 'player-card';
+    const img = p.thumbnail ? `data:image/jpeg;base64,${p.thumbnail}` : '';
+    card.innerHTML = `<img src="${img}" alt="Player ${p.track_id}">
+      <div class="track-label">Player #${p.track_id} (${p.appearances} frames)</div>`;
+    card.addEventListener('click', () => {
+      document.querySelectorAll('.player-card').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+      selectedTrackId = p.track_id;
+      document.getElementById('analyze-btn').disabled = false;
+    });
+    grid.appendChild(card);
+  });
+}
+
+async function startAnalysis() {
+  const jersey = document.getElementById('jersey-input').value.trim();
+  const name = document.getElementById('name-input').value.trim();
+  goToStep(3);
+  try {
+    const res = await fetch(API_BASE + `/games/${jobId}/analyze`, {
+      method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ track_id: selectedTrackId, jersey_number: jersey, player_name: name }),
+    });
+    if (res.status === 402) { document.getElementById('analysis-text').textContent = 'No analyses remaining.'; return; }
+    pollStatus();
+  } catch (err) {
+    document.getElementById('analysis-text').textContent = 'Failed: ' + err.message;
+  }
+}
+
+async function pollStatus() {
+  const iv = setInterval(async () => {
+    try {
+      const res = await fetch(API_BASE + `/games/${jobId}/status`, { headers: authHeaders() });
+      const data = await res.json();
+      if (data.status === 'completed') {
+        clearInterval(iv);
+        document.getElementById('processing-status').classList.add('hidden');
+        document.getElementById('results-ready').classList.remove('hidden');
+        loadResults();
+      } else if (data.status === 'failed') {
+        clearInterval(iv);
+        document.getElementById('analysis-text').textContent = 'Analysis failed: ' + (data.error || '');
+      } else {
+        document.getElementById('analysis-progress').style.width = (data.progress || 0) + '%';
+        document.getElementById('analysis-text').textContent = `Processing… ${data.progress || 0}%`;
+      }
+    } catch (e) { /* keep polling */ }
+  }, 8000);
+}
+
+async function loadResults() {
+  const body = document.getElementById('results-body');
+  try {
+    const stats = await (await fetch(API_BASE + `/games/${jobId}/stats`, { headers: authHeaders() })).json();
+    const hl = await (await fetch(API_BASE + `/games/${jobId}/highlights`, { headers: authHeaders() })).json();
+    let html = '';
+    const reels = hl.reels || {};
+    const reelKeys = Object.keys(reels);
+    if (reelKeys.length) {
+      html += '<h3 style="margin-bottom:12px;">🎬 Highlight Reels</h3>';
+      reelKeys.forEach(pid => {
+        html += `<p style="margin:6px 0;"><a class="btn btn-gold" href="${reels[pid]}" target="_blank">Download reel — Player #${pid}</a></p>`;
+      });
+    }
+    html += '<h3 style="margin:20px 0 12px;">📊 Player Stats</h3>';
+    const players = (stats.players) || {};
+    html += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">';
+    html += '<tr style="color:#a259ff;"><th style="padding:6px;">#</th><th>PTS</th><th>REB</th><th>AST</th><th>STL</th><th>TO</th></tr>';
+    Object.values(players).forEach(p => {
+      html += `<tr style="border-top:1px solid rgba(255,255,255,0.1);text-align:center;">
+        <td style="padding:6px;">${p.jersey_number || p.track_id}</td><td>${p.points||0}</td>
+        <td>${p.total_rebounds||0}</td><td>${p.assists||0}</td><td>${p.steals||0}</td><td>${p.turnovers||0}</td></tr>`;
+    });
+    html += '</table></div>';
+    body.innerHTML = html;
+  } catch (e) {
+    body.textContent = 'Could not load results.';
+  }
+}
+
+function goToStep(step) {
+  document.getElementById('step-upload').classList.toggle('hidden', step !== 1);
+  document.getElementById('step-select').classList.toggle('hidden', step !== 2);
+  document.getElementById('step-results').classList.toggle('hidden', step !== 3);
+  for (let i = 1; i <= 3; i++) {
+    const el = document.getElementById(`step-ind-${i}`);
+    el.classList.remove('active', 'done');
+    if (i < step) el.classList.add('done');
+    else if (i === step) el.classList.add('active');
+  }
+}
+</script>
+</body>
+</html>
