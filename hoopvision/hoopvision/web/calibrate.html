@@ -18,15 +18,22 @@
   .muted { color: #8a91a3; font-size: 12px; }
   button { background: #2d5fd0; color: #fff; border: 0; padding: 9px 14px; border-radius: 6px; cursor: pointer; width: 100%; margin-top: 10px; }
   button.secondary { background: #262b38; }
+  select { width: 100%; margin: 4px 0 12px; padding: 7px; background: #1a1e28; color: #e8eaf0; border: 1px solid #262a35; border-radius: 6px; }
   #status { margin-top: 10px; font-size: 12px; }
 </style>
 </head>
 <body>
 <header>Click the highlighted landmark on the frame. At least 4 court landmarks, plus a
-  box around each rim (click top-left then bottom-right).</header>
+  box around each rim (click top-left then bottom-right). A camera framed on one basket
+  can use that end's lane and free-throw line on their own.</header>
 <main>
   <div id="stage"><img id="frame" src="/frame.jpg" /><svg id="overlay"></svg></div>
   <aside>
+    <label class="muted" for="court">Court</label>
+    <select id="court">
+      <option value="94">Full size — 94 ft (NBA / college)</option>
+      <option value="84">High school — 84 ft</option>
+    </select>
     <div id="list"></div>
     <div class="muted" id="hint"></div>
     <button id="save">Save calibration</button>
@@ -38,12 +45,16 @@
 const $ = s => document.querySelector(s);
 let landmarks = {}, points = {}, rims = {}, pending = [], targets = [], current = 0;
 
+function courtLength() { return parseFloat($('#court').value); }
+
 async function init() {
-  landmarks = await (await fetch('/api/landmarks')).json();
+  landmarks = await (await fetch(`/api/landmarks?court_length_ft=${courtLength()}`)).json();
   targets = [...Object.keys(landmarks), 'rim:left:topleft', 'rim:left:bottomright',
              'rim:right:topleft', 'rim:right:bottomright'];
   render();
 }
+
+$('#court').onchange = init;
 
 function render() {
   $('#list').innerHTML = targets.map((t, i) => {
@@ -101,7 +112,7 @@ $('#undo').onclick = () => {
 $('#save').onclick = async () => {
   const res = await fetch('/api/calibration', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ image_points: points, rim_boxes: rims }),
+    body: JSON.stringify({ image_points: points, rim_boxes: rims, court_length_ft: courtLength() }),
   });
   const body = await res.json();
   $('#status').textContent = res.ok ? `Saved to ${body.saved}` : `Error: ${body.detail}`;

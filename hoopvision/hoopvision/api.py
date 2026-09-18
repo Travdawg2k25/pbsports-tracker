@@ -15,7 +15,14 @@ from pydantic import BaseModel
 
 from .boxscore import player_clips
 from .config import Config
-from .court import LANDMARKS_FT, Calibration
+from .court import (
+    COURT_LENGTH_FT,
+    COURT_WIDTH_FT,
+    FT_LINE_FT,
+    LANE_WIDTH_FT,
+    Calibration,
+    landmarks_ft,
+)
 from .types import Event, load_json
 
 WEB = Path(__file__).parent / "web"
@@ -91,8 +98,10 @@ def create_app(run_dir: str | Path, video: str | Path | None = None) -> FastAPI:
 class CalibrationPayload(BaseModel):
     image_points: dict[str, tuple[float, float]]
     rim_boxes: dict[str, tuple[float, float, float, float]] = {}
-    court_length_ft: float = 94.0
-    court_width_ft: float = 50.0
+    court_length_ft: float = COURT_LENGTH_FT
+    court_width_ft: float = COURT_WIDTH_FT
+    lane_width_ft: float = LANE_WIDTH_FT
+    ft_line_ft: float = FT_LINE_FT
 
 
 def create_calibration_app(frame_image: str | Path, out_path: str | Path) -> FastAPI:
@@ -107,8 +116,13 @@ def create_calibration_app(frame_image: str | Path, out_path: str | Path) -> Fas
         return FileResponse(frame_image, media_type="image/jpeg")
 
     @app.get("/api/landmarks")
-    def landmarks() -> dict[str, tuple[float, float]]:
-        return LANDMARKS_FT
+    def landmarks(
+        court_length_ft: float = COURT_LENGTH_FT,
+        court_width_ft: float = COURT_WIDTH_FT,
+        lane_width_ft: float = LANE_WIDTH_FT,
+        ft_line_ft: float = FT_LINE_FT,
+    ) -> dict[str, tuple[float, float]]:
+        return landmarks_ft(court_length_ft, court_width_ft, lane_width_ft, ft_line_ft)
 
     @app.post("/api/calibration")
     def save(payload: CalibrationPayload) -> dict[str, Any]:
@@ -117,6 +131,8 @@ def create_calibration_app(frame_image: str | Path, out_path: str | Path) -> Fas
             rim_boxes=dict(payload.rim_boxes),
             court_length_ft=payload.court_length_ft,
             court_width_ft=payload.court_width_ft,
+            lane_width_ft=payload.lane_width_ft,
+            ft_line_ft=payload.ft_line_ft,
         )
         try:
             _ = calib.homography  # solvable? reject the marks rather than write them

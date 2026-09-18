@@ -58,6 +58,15 @@ hoopvision serve runs/game            # http://localhost:8000
 `runs/game/boxscore.json` holds the full box score; the UI lets you click a player and
 see every counted event with a jump-to-timestamp clip.
 
+### Courts the camera only half shows
+
+Calibration needs four court points, and a camera framed on one basket never shows
+both baselines. That end's lane corners and free-throw line are four points on their
+own, so half a court calibrates. The court selector covers the 84 ft high school floor
+as well as the 94 ft one; the lane and free-throw line are identical on both, but the
+far rim and the halfcourt line are not, and marking a high school floor as 94 ft puts
+every distance — including the three-point line — out by ten feet.
+
 ### Footage that is not locked off
 
 A calibration is only valid for the frame it was marked on. Before tracking, every

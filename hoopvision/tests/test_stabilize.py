@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import cv2
+import numpy as np
 import pytest
 
 from hoopvision import synthetic
@@ -11,7 +13,7 @@ from hoopvision.boxscore import aggregate
 from hoopvision.config import Config
 from hoopvision.events import build_events
 from hoopvision.pipeline import stage_motion
-from hoopvision.stabilize import Motion, displacement, estimate_motion
+from hoopvision.stabilize import Motion, displacement, estimate_motion, rescale
 from hoopvision.types import VideoMeta, load_json, tracks_from_json
 
 PAN_PX = 40.0
@@ -44,6 +46,15 @@ def test_pan_is_recovered(tmp_path):
         x, y = motion.warp(640 + dx, 360, frame)
         assert x == pytest.approx(640, abs=4.0)
         assert y == pytest.approx(360, abs=4.0)
+
+
+def test_matching_at_reduced_width_gives_full_resolution_pixels():
+    """A 20 px shift seen at half size is a 40 px shift on the full frame."""
+    half = np.array([[1, 0, -20], [0, 1, 0], [0, 0, 1]], dtype=np.float64)
+    full = rescale(half, 0.5)
+    pt = np.array([[[640.0, 360.0]]], dtype=np.float32)
+    x, y = cv2.perspectiveTransform(pt, full)[0][0]
+    assert (x, y) == pytest.approx((600.0, 360.0))
 
 
 def test_motion_stage_skips_a_static_camera(tmp_path):

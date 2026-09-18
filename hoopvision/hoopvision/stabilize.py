@@ -27,6 +27,8 @@ log = logging.getLogger("hoopvision")
 
 MIN_INLIERS = 30
 MIN_MATCHES = 12
+# Feature matching gains nothing from 4K pixels and costs a second a frame at it.
+FEATURE_WIDTH = 1280
 
 
 @dataclass
@@ -126,22 +128,42 @@ class _Features:
         return H, int(mask.sum())
 
 
+def _downscale(frame: np.ndarray, width: int) -> tuple[np.ndarray, float]:
+    if width <= 0 or frame.shape[1] <= width:
+        return frame, 1.0
+    s = width / frame.shape[1]
+    return cv2.resize(frame, (width, int(round(frame.shape[0] * s)))), s
+
+
+def rescale(H: np.ndarray, scale: float) -> np.ndarray:
+    """A homography found at ``scale`` of full size, expressed in full-size pixels."""
+    S = np.array([[scale, 0, 0], [0, scale, 0], [0, 0, 1]], dtype=np.float64)
+    return np.linalg.inv(S) @ H @ S
+
+
 def estimate_motion(
     video: str | Path,
     reference_frame: int = 0,
     stride: int = 1,
     end: int | None = None,
     mask_floor: bool = True,
+    feature_width: int = FEATURE_WIDTH,
 ) -> Motion:
-    """Estimate every processed frame's homography back to ``reference_frame``."""
+    """Estimate every processed frame's homography back to ``reference_frame``.
+
+    Homographies are in full-resolution pixels regardless of ``feature_width``, which
+    only controls the resolution features are matched at.
+    """
     feat = _Features(mask_floor=mask_floor)
     motion = Motion(reference_frame=reference_frame)
     ref = None
     prev = None
     prev_H = np.eye(3)
     chained = 0
+    scale = 1.0
     for idx, frame in iter_frames(video, stride=stride, end=end):
-        desc = feat.describe(frame)
+        small, scale = _downscale(frame, feature_width)
+        desc = feat.describe(small)
         if ref is None:
             ref = desc
             motion.homographies[idx] = np.eye(3)
@@ -158,6 +180,10 @@ def estimate_motion(
                 H = prev_H
         motion.homographies[idx] = H
         prev, prev_H = desc, H
+    if scale != 1.0:
+        motion.homographies = {
+            f: rescale(H, scale) for f, H in motion.homographies.items()
+        }
     if chained:
         log.info("motion: %d/%d frames chained from the previous frame",
                  chained, len(motion.homographies))

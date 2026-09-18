@@ -26,21 +26,59 @@ from .types import Box, dump_json, load_json
 
 COURT_LENGTH_FT = 94.0
 COURT_WIDTH_FT = 50.0
-# Rim centres, 5.25 ft from the baseline on the centre line of the court.
-HOOPS_FT: dict[str, tuple[float, float]] = {
-    "left": (5.25, 25.0),
-    "right": (COURT_LENGTH_FT - 5.25, 25.0),
-}
+# High school floors are 84 ft long; the lane and free-throw line are the same.
+HS_COURT_LENGTH_FT = 84.0
+LANE_WIDTH_FT = 12.0
+FT_LINE_FT = 19.0
+RIM_FROM_BASELINE_FT = 5.25
 
-# Landmarks a human can point at unambiguously on a sideline view.
-LANDMARKS_FT: dict[str, tuple[float, float]] = {
-    "left_baseline_near_sideline": (0.0, 0.0),
-    "left_baseline_far_sideline": (0.0, COURT_WIDTH_FT),
-    "right_baseline_near_sideline": (COURT_LENGTH_FT, 0.0),
-    "right_baseline_far_sideline": (COURT_LENGTH_FT, COURT_WIDTH_FT),
-    "halfcourt_near_sideline": (COURT_LENGTH_FT / 2, 0.0),
-    "halfcourt_far_sideline": (COURT_LENGTH_FT / 2, COURT_WIDTH_FT),
-}
+
+def hoops_ft(
+    length: float = COURT_LENGTH_FT, width: float = COURT_WIDTH_FT
+) -> dict[str, tuple[float, float]]:
+    """Rim centres, 5.25 ft off each baseline on the centre line of the court."""
+    return {
+        "left": (RIM_FROM_BASELINE_FT, width / 2),
+        "right": (length - RIM_FROM_BASELINE_FT, width / 2),
+    }
+
+
+def landmarks_ft(
+    length: float = COURT_LENGTH_FT,
+    width: float = COURT_WIDTH_FT,
+    lane_width: float = LANE_WIDTH_FT,
+    ft_line: float = FT_LINE_FT,
+) -> dict[str, tuple[float, float]]:
+    """Court points a human can pick out unambiguously, in feet.
+
+    Baseline and halfcourt corners need a camera that sees the whole floor. The lane
+    and free-throw line of one end are enough on their own, which is all a camera
+    framed on a single basket ever shows.
+    """
+    mid = width / 2
+    lane_near, lane_far = mid - lane_width / 2, mid + lane_width / 2
+    marks: dict[str, tuple[float, float]] = {
+        "halfcourt_near_sideline": (length / 2, 0.0),
+        "halfcourt_far_sideline": (length / 2, width),
+        "centre_circle_near": (length / 2, mid - 6.0),
+        "centre_circle_far": (length / 2, mid + 6.0),
+    }
+    for side, baseline, inward in (("left", 0.0, 1.0), ("right", length, -1.0)):
+        marks.update(
+            {
+                f"{side}_baseline_near_sideline": (baseline, 0.0),
+                f"{side}_baseline_far_sideline": (baseline, width),
+                f"{side}_lane_baseline_near": (baseline, lane_near),
+                f"{side}_lane_baseline_far": (baseline, lane_far),
+                f"{side}_ft_line_near": (baseline + inward * ft_line, lane_near),
+                f"{side}_ft_line_far": (baseline + inward * ft_line, lane_far),
+            }
+        )
+    return marks
+
+
+HOOPS_FT: dict[str, tuple[float, float]] = hoops_ft()
+LANDMARKS_FT: dict[str, tuple[float, float]] = landmarks_ft()
 
 
 @dataclass
@@ -51,22 +89,35 @@ class Calibration:
     rim_boxes: dict[str, Box] = field(default_factory=dict)  # "left" / "right"
     court_length_ft: float = COURT_LENGTH_FT
     court_width_ft: float = COURT_WIDTH_FT
+    lane_width_ft: float = LANE_WIDTH_FT
+    ft_line_ft: float = FT_LINE_FT
     motion: Motion | None = None
 
     def __post_init__(self) -> None:
         self._H: np.ndarray | None = None
 
     @property
+    def landmarks(self) -> dict[str, tuple[float, float]]:
+        return landmarks_ft(
+            self.court_length_ft, self.court_width_ft, self.lane_width_ft, self.ft_line_ft
+        )
+
+    @property
+    def hoops(self) -> dict[str, tuple[float, float]]:
+        return hoops_ft(self.court_length_ft, self.court_width_ft)
+
+    @property
     def homography(self) -> np.ndarray:
         if self._H is None:
-            named = [(k, v) for k, v in self.image_points.items() if k in LANDMARKS_FT]
+            marks = self.landmarks
+            named = [(k, v) for k, v in self.image_points.items() if k in marks]
             if len(named) < 4:
                 raise ValueError(
                     f"need at least 4 known landmarks, got {len(named)}: "
                     f"{sorted(self.image_points)}"
                 )
             src = np.array([v for _, v in named], dtype=np.float32)
-            dst = np.array([LANDMARKS_FT[k] for k, _ in named], dtype=np.float32)
+            dst = np.array([marks[k] for k, _ in named], dtype=np.float32)
             H, _ = cv2.findHomography(src, dst, cv2.RANSAC, 5.0)
             if H is None:
                 raise ValueError("homography solve failed; check the marked points")
@@ -102,7 +153,7 @@ class Calibration:
 
     def hoop_distance_ft(self, court_xy: tuple[float, float], hoop: str | None = None) -> float:
         hoop = hoop or self.nearest_hoop(court_xy)
-        hx, hy = HOOPS_FT[hoop]
+        hx, hy = self.hoops[hoop]
         return float(np.hypot(court_xy[0] - hx, court_xy[1] - hy))
 
     def save(self, path: str | Path) -> None:
@@ -112,6 +163,8 @@ class Calibration:
                 "rim_boxes": {k: list(v) for k, v in self.rim_boxes.items()},
                 "court_length_ft": self.court_length_ft,
                 "court_width_ft": self.court_width_ft,
+                "lane_width_ft": self.lane_width_ft,
+                "ft_line_ft": self.ft_line_ft,
             },
             path,
         )
@@ -124,6 +177,8 @@ class Calibration:
             rim_boxes={k: tuple(v) for k, v in raw.get("rim_boxes", {}).items()},
             court_length_ft=raw.get("court_length_ft", COURT_LENGTH_FT),
             court_width_ft=raw.get("court_width_ft", COURT_WIDTH_FT),
+            lane_width_ft=raw.get("lane_width_ft", LANE_WIDTH_FT),
+            ft_line_ft=raw.get("ft_line_ft", FT_LINE_FT),
         )
 
 
