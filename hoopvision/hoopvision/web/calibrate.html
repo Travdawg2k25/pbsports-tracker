@@ -43,7 +43,7 @@
 </main>
 <script>
 const $ = s => document.querySelector(s);
-let landmarks = {}, points = {}, rims = {}, pending = [], targets = [], current = 0;
+let landmarks = {}, points = {}, rims = {}, pending = [], targets = [], current = 0, history = [];
 
 function courtLength() { return parseFloat($('#court').value); }
 
@@ -76,17 +76,24 @@ $('#frame').addEventListener('click', ev => {
   const target = targets[current];
   if (target.startsWith('rim:')) {
     pending = pending.filter(p => p.target !== target).concat([{ target, x, y }]);
-    for (const side of ['left', 'right']) {
-      const tl = pending.find(p => p.target === `rim:${side}:topleft`);
-      const br = pending.find(p => p.target === `rim:${side}:bottomright`);
-      if (tl && br) rims[side] = [tl.x, tl.y, br.x, br.y];
-    }
+    syncRims();
   } else {
     points[target] = [x, y];
   }
+  history = history.filter(t => t !== target).concat([target]);
   current = Math.min(current + 1, targets.length - 1);
   render();
 });
+
+// A rim box exists only while both of its corners do.
+function syncRims() {
+  for (const side of ['left', 'right']) {
+    const tl = pending.find(p => p.target === `rim:${side}:topleft`);
+    const br = pending.find(p => p.target === `rim:${side}:bottomright`);
+    if (tl && br) rims[side] = [tl.x, tl.y, br.x, br.y];
+    else delete rims[side];
+  }
+}
 
 function drawOverlay() {
   const img = $('#frame');
@@ -102,10 +109,12 @@ function drawOverlay() {
 }
 
 $('#undo').onclick = () => {
-  const target = targets[Math.max(0, current - 1)];
+  const target = history.pop();
+  if (!target) return;
   delete points[target];
   pending = pending.filter(p => p.target !== target);
-  current = Math.max(0, current - 1);
+  syncRims();
+  current = Math.max(0, targets.indexOf(target));
   render();
 };
 

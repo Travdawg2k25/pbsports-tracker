@@ -9,9 +9,19 @@ from hoopvision.config import Config
 from hoopvision.court import HOOPS_FT, Calibration
 from hoopvision.events import ball_speeds, build_events, possessions
 from hoopvision.jersey import merge_identities, resolve_identity
+from hoopvision.pipeline import stage_boxscore
 from hoopvision.teams import assign_teams
 from hoopvision.track import ByteTracker, iou_matrix
-from hoopvision.types import Detection, Event, Identity, Track, TrackFrame, tracks_from_json
+from hoopvision.types import (
+    Detection,
+    Event,
+    Identity,
+    Track,
+    TrackFrame,
+    VideoMeta,
+    dump_json,
+    tracks_from_json,
+)
 
 
 def test_iou_matrix_matches_hand_computation():
@@ -189,6 +199,14 @@ def test_aggregate_counts_each_stat_once():
     assert lines["home:7"]["offensive_rebounds"] == 1
     assert lines["away:4"]["steals"] == 1
     assert box["teams"]["home"]["points"] == 3
+
+
+def test_boxscore_records_the_clip_duration(tmp_path):
+    # The review header reads video.duration_s, which is a property and so absent from
+    # a plain dataclass dump.
+    dump_json([], tmp_path / "events.json")
+    box = stage_boxscore(tmp_path, VideoMeta("clip.mp4", 30.0, 1920, 1080, 900), None)
+    assert box["video"]["duration_s"] == pytest.approx(30.0)
 
 
 def test_player_clips_window_around_events():

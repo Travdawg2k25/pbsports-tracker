@@ -12,6 +12,8 @@ It is *not* a substitute for validating detection and OCR on real footage.
 from __future__ import annotations
 
 import math
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +26,36 @@ from .types import Track, TrackFrame, dump_json
 W, H = 1280, 720
 MARGIN = 60
 FPS = 30.0
+
+
+def _to_h264(path: Path) -> None:
+    """Re-encode in place: browsers refuse the MPEG-4 Part 2 stream OpenCV writes."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return
+    tmp = path.with_suffix(".h264.mp4")
+    done = subprocess.run(
+        [
+            ffmpeg,
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            str(path),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(tmp),
+        ],
+        check=False,
+    )
+    if done.returncode == 0 and tmp.exists():
+        tmp.replace(path)
+    else:
+        tmp.unlink(missing_ok=True)
 
 
 def court_to_px(x_ft: float, y_ft: float) -> tuple[float, float]:
@@ -136,6 +168,7 @@ def generate(
             frame_idx += 1
 
     writer.release()
+    _to_h264(video_path)
 
     paths = {"video": video_path}
     if write_tracks:
@@ -159,13 +192,20 @@ def generate(
             out / "identities.json",
         )
         dump_json(
-            {"teams": {str(i + 1): PLAYERS[i][1] for i in range(len(PLAYERS))},
-             "kit_separation": 9.9},
+            {
+                "teams": {str(i + 1): PLAYERS[i][1] for i in range(len(PLAYERS))},
+                "kit_separation": 9.9,
+            },
             out / "teams.json",
         )
         dump_json(
-            {"path": str(video_path), "fps": FPS, "width": W, "height": H,
-             "frame_count": frame_idx},
+            {
+                "path": str(video_path),
+                "fps": FPS,
+                "width": W,
+                "height": H,
+                "frame_count": frame_idx,
+            },
             out / "video.json",
         )
         calibration(out / "calibration.json")

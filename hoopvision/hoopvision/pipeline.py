@@ -180,7 +180,7 @@ def stage_boxscore(out: Path, meta: VideoMeta, roster: str | Path | None) -> dic
     raw = load_json(out / "events.json")
     events = [Event(**e) for e in raw]
     box = aggregate(events, meta.fps, load_roster(roster))
-    box["video"] = asdict(meta)
+    box["video"] = asdict(meta) | {"duration_s": meta.duration_s}
     dump_json(box, out / "boxscore.json")
     return box
 
