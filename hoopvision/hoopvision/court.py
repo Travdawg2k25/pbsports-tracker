@@ -31,6 +31,8 @@ HS_COURT_LENGTH_FT = 84.0
 LANE_WIDTH_FT = 12.0
 FT_LINE_FT = 19.0
 RIM_FROM_BASELINE_FT = 5.25
+# A regulation rim is 18 inches across — the scale reference for the rim-only path.
+RIM_DIAMETER_FT = 1.5
 
 
 def hoops_ft(
@@ -107,6 +109,33 @@ class Calibration:
         return hoops_ft(self.court_length_ft, self.court_width_ft)
 
     @property
+    def has_homography(self) -> bool:
+        """True when enough landmarks are marked to solve a real image->court map.
+
+        The rim-only path (auto-detected rim, no court landmarks) has none: makes,
+        points and FG% still work off the rim box, but court-space distances fall back
+        to an approximate pixel scale — see :meth:`to_court` and :attr:`distance_reliable`.
+        """
+        marks = self.landmarks
+        named = [k for k in self.image_points if k in marks]
+        if len(named) < 4:
+            return False
+        try:
+            return self.homography is not None
+        except ValueError:
+            return False
+
+    @property
+    def distance_reliable(self) -> bool:
+        """Whether court-space distances (2-vs-3, shot distance) can be trusted.
+
+        Only a solved homography gives real feet. Without it, distance-derived stats
+        (three-pointers, shot distance) are best-effort and the box score flags them so
+        a human can correct them.
+        """
+        return self.has_homography
+
+    @property
     def homography(self) -> np.ndarray:
         if self._H is None:
             marks = self.landmarks
@@ -124,6 +153,20 @@ class Calibration:
             self._H = H
         return self._H
 
+    @property
+    def _px_per_ft(self) -> float:
+        """Rough pixels-per-foot from the rim box (a rim is ~1.5 ft across).
+
+        Used only on the rim-only path to turn pixel gaps into approximate feet so the
+        possession/proximity logic keeps working. It ignores perspective, so it is a
+        coarse scale, not a real projection.
+        """
+        widths = [abs(r[2] - r[0]) for r in self.rim_boxes.values() if r]
+        if widths:
+            return max(1e-3, float(np.mean(widths)) / RIM_DIAMETER_FT)
+        # No rim either: assume a mid-range broadcast scale so distances stay finite.
+        return 10.0
+
     def to_reference(self, x: float, y: float, frame: int | None = None) -> tuple[float, float]:
         """Pixel position on the frame the calibration was marked on."""
         if self.motion is None or frame is None:
@@ -131,7 +174,17 @@ class Calibration:
         return self.motion.warp(x, y, frame)
 
     def to_court(self, x: float, y: float, frame: int | None = None) -> tuple[float, float]:
+        """Court-space position in feet.
+
+        With a solved homography this is a true projection. On the rim-only path there is
+        no homography, so the reference-frame pixel is scaled by :attr:`_px_per_ft` into
+        approximate feet: good enough for "who is closest to the ball", not for real
+        distances. :attr:`distance_reliable` says which case you are in.
+        """
         rx, ry = self.to_reference(x, y, frame)
+        if not self.has_homography:
+            scale = self._px_per_ft
+            return rx / scale, ry / scale
         pt = np.array([[[rx, ry]]], dtype=np.float32)
         out = cv2.perspectiveTransform(pt, self.homography)[0][0]
         return float(out[0]), float(out[1])
@@ -173,7 +226,7 @@ class Calibration:
     def load(cls, path: str | Path) -> Calibration:
         raw = load_json(path)
         return cls(
-            image_points={k: tuple(v) for k, v in raw["image_points"].items()},
+            image_points={k: tuple(v) for k, v in raw.get("image_points", {}).items()},
             rim_boxes={k: tuple(v) for k, v in raw.get("rim_boxes", {}).items()},
             court_length_ft=raw.get("court_length_ft", COURT_LENGTH_FT),
             court_width_ft=raw.get("court_width_ft", COURT_WIDTH_FT),
@@ -183,5 +236,11 @@ class Calibration:
 
 
 def shot_value(calib: Calibration, court_xy: tuple[float, float], three_radius: float) -> int:
-    """2 or 3 points for a shot taken from ``court_xy``."""
+    """2 or 3 points for a shot taken from ``court_xy``.
+
+    Without a solved homography the distance is approximate, so we do not guess a three:
+    the shot counts as 2 and the box score marks the value best-effort for a human to fix.
+    """
+    if not calib.distance_reliable:
+        return 2
     return 3 if calib.hoop_distance_ft(court_xy) >= three_radius else 2

@@ -214,6 +214,12 @@ async def next_job(x_worker_secret: str = Header(default="")):
                 sel = _s3_get_json(f"results/{job['job_id']}/selected.json") or {}
                 payload["selected_players"] = sel.get("selected_players", [])
                 payload["selected_appearances"] = sel.get("selected_appearances", {})
+                # The parent-entered jersey/name live on the row; forward them so the
+                # worker can stamp them onto the selected player's box score (the AI
+                # draft otherwise shows only the OCR-guessed number).
+                payload["jersey_number"] = job.get("jersey_number")
+                payload["player_name"] = job.get("player_name")
+                payload["focus_track_id"] = job.get("focus_track_id")
             return payload
     return {}
 
