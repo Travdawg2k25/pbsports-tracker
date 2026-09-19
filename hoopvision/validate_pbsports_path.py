@@ -71,8 +71,12 @@ def write_h264(frames, path, fps, size):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("video")
-    ap.add_argument("--rim-model", default="/opt/pbsports/basketball_rim_best.pt")
+    ap.add_argument("--rim-model", default="/opt/pbsports/basketball_rim_best.pt",
+                    help="custom model for auto-rim detection ONLY (not the ball)")
     ap.add_argument("--player-model", default="yolov8x.pt")
+    ap.add_argument("--ball-model", default=None,
+                    help="COCO ball model; default keeps HoopVision's yolov8x.pt "
+                         "(must detect COCO 'sports ball', NOT the custom rim model)")
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--court-length-ft", type=float, default=84.0)
     ap.add_argument("--max-frames", type=int, default=None)
@@ -104,7 +108,11 @@ def main():
     cfg.detection.device = args.device
     cfg.detection.half = args.device != "cpu"
     cfg.detection.model = args.player_model
-    cfg.detection.ball_model = args.rim_model
+    # The rim model is used ONLY for auto-rim above. HoopVision's own ball detector
+    # filters for the COCO "sports ball" class, so the ball model must stay a COCO
+    # checkpoint (yolov8x.pt); pointing it at the custom rim model detects no ball.
+    if args.ball_model:
+        cfg.detection.ball_model = args.ball_model
     boxscore = hv_run(
         video=args.video, out_dir=str(out / "run"), calibration=str(calib_path),
         config=cfg, max_frames=args.max_frames,
