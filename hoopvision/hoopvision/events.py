@@ -122,8 +122,16 @@ def possessions(
         if current and current.end - current.start + 1 >= cfg.possession_min_frames:
             out.append(current)
         team, jersey = identities.get(tid, (None, None))
+        # A player key always exists so their events survive aggregation. Jersey OCR only
+        # resolves a fraction of tracks on real footage, but the product identifies the
+        # selected player by appearance + the parent-typed number, not by OCR — so an
+        # un-OCR'd track keys by its track id ("home:t5") instead of being dropped.
+        if jersey:
+            player_key = f"{team or 'unknown'}:{jersey}"
+        else:
+            player_key = f"{team or 'unknown'}:t{tid}"
         current = Possession(
-            player=f"{team or 'unknown'}:{jersey}" if jersey else None,
+            player=player_key,
             track_id=tid,
             team=team,
             start=frame,

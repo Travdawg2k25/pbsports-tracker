@@ -47,13 +47,19 @@ def _player_line_to_pbsports(
     tpm, tpa = line.get("tpm", 0), line.get("tpa", 0)
     points = line.get("points", 0)
 
+    # An un-OCR'd track carries a synthetic "t<id>" jersey so its events survive; that is
+    # a placeholder, not a real number, so display it as unknown unless the parent typed one.
+    ocr_jersey = line.get("jersey")
+    if ocr_jersey and str(ocr_jersey).startswith("t") and str(ocr_jersey)[1:].isdigit():
+        ocr_jersey = None
+
     # Effective FG% counts a three as 1.5 baskets; true shooting adds FTs (none here).
     efg = round((fgm + 0.5 * tpm) / fga, 3) if fga else None
     ts = round(points / (2 * fga), 3) if fga else None
 
     row: dict[str, Any] = {
         "track_id": _track_id_from_key(line["player"]),
-        "jersey_number": jersey_override or line.get("jersey"),
+        "jersey_number": jersey_override or ocr_jersey,
         "team_id": line.get("team"),
         "name": name_override or line.get("name"),
         # Scoring — reliable on the rim-only path
