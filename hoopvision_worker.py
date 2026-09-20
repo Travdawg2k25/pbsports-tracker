@@ -77,10 +77,10 @@ BALL_MODEL = os.environ.get("HV_BALL_MODEL", RIM_MODEL) or None
 BALL_CLASS = int(os.environ.get("HV_BALL_CLASS", "0"))
 COURT_LENGTH_FT = float(os.environ.get("HV_COURT_LENGTH_FT", "84.0"))
 MAX_FRAMES = int(os.environ["HV_MAX_FRAMES"]) if os.environ.get("HV_MAX_FRAMES") else None
-# Process every Nth frame. The single biggest throughput lever: a box score barely
-# changes at stride 2-3 (the ball/players move little in 1/30s) but detection cost drops
-# proportionally. Default 3 makes a full game minutes instead of hours on a T4.
-FRAME_STRIDE = int(os.environ.get("HV_FRAME_STRIDE", "3"))
+# Process every Nth frame — the main throughput lever. Measured: stride 3 fragments the
+# ByteTrack player tracker (3-frame jumps break IoU association -> broken tracks -> no
+# possessions), so 2 is the safe ceiling for this tracker. Detection cost still ~halves.
+FRAME_STRIDE = int(os.environ.get("HV_FRAME_STRIDE", "2"))
 FFMPEG_BIN = os.environ.get("FFMPEG_BIN") or shutil.which("ffmpeg")
 
 HEADERS = {"X-Worker-Secret": WORKER_SECRET}
