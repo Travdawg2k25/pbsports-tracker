@@ -84,6 +84,9 @@ def main():
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--court-length-ft", type=float, default=84.0)
     ap.add_argument("--max-frames", type=int, default=None)
+    ap.add_argument("--frame-stride", type=int, default=1,
+                    help="process every Nth frame (throughput lever; higher=faster but "
+                         "sparser tracks, which can hurt made-shot detection)")
     ap.add_argument("--jersey", default=None)
     ap.add_argument("--name", default=None)
     ap.add_argument("--out", default="runs/pbtest")
@@ -112,6 +115,12 @@ def main():
     cfg.detection.device = args.device
     cfg.detection.half = args.device != "cpu"
     cfg.detection.model = args.player_model
+    cfg.frame_stride = args.frame_stride
+    # Scale frame-count thresholds so striding doesn't starve made-shot / possession
+    # detection (they count sampled frames, each spanning frame_stride real frames).
+    if args.frame_stride > 1:
+        cfg.events.made_descent_frames = max(2, cfg.events.made_descent_frames // args.frame_stride)
+        cfg.events.possession_min_frames = max(2, cfg.events.possession_min_frames // args.frame_stride)
     # The rim model is used ONLY for auto-rim above. HoopVision's own ball detector
     # filters for the COCO "sports ball" class, so the ball model must stay a COCO
     # checkpoint (yolov8x.pt); pointing it at the custom rim model detects no ball.

@@ -77,6 +77,10 @@ BALL_MODEL = os.environ.get("HV_BALL_MODEL", RIM_MODEL) or None
 BALL_CLASS = int(os.environ.get("HV_BALL_CLASS", "0"))
 COURT_LENGTH_FT = float(os.environ.get("HV_COURT_LENGTH_FT", "84.0"))
 MAX_FRAMES = int(os.environ["HV_MAX_FRAMES"]) if os.environ.get("HV_MAX_FRAMES") else None
+# Process every Nth frame. The single biggest throughput lever: a box score barely
+# changes at stride 2-3 (the ball/players move little in 1/30s) but detection cost drops
+# proportionally. Default 3 makes a full game minutes instead of hours on a T4.
+FRAME_STRIDE = int(os.environ.get("HV_FRAME_STRIDE", "3"))
 FFMPEG_BIN = os.environ.get("FFMPEG_BIN") or shutil.which("ffmpeg")
 
 HEADERS = {"X-Worker-Secret": WORKER_SECRET}
@@ -292,6 +296,16 @@ def do_analyze(job):
         cfg.detection.device = DEVICE
         cfg.detection.half = DEVICE != "cpu"
         cfg.detection.model = PLAYER_MODEL
+        cfg.frame_stride = FRAME_STRIDE
+        # Made-shot detection counts descending *sampled* frames through the rim. Striding
+        # makes each sampled frame span FRAME_STRIDE real frames, so the descent
+        # requirement must scale down or real makes are missed. A shot descends through
+        # the rim in ~6-8 real frames; keep at least 2 sampled frames of descent.
+        if FRAME_STRIDE > 1:
+            cfg.events.made_descent_frames = max(2, cfg.events.made_descent_frames // FRAME_STRIDE)
+            cfg.events.possession_min_frames = max(
+                2, cfg.events.possession_min_frames // FRAME_STRIDE
+            )
         # Ball detection: use the basketball-trained model + its class, so the ball
         # track is clean enough for made-shot detection. detect_ball filters by
         # cfg.detection.ball_class, so model and class must agree.
