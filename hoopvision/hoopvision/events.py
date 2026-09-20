@@ -164,8 +164,12 @@ def rim_events(ball: Track, calib: Calibration, cfg: EventConfig) -> list[RimEve
     for hoop, rim in calib.rim_boxes.items():
         rx1, ry1, rx2, ry2 = rim
         width, height = rx2 - rx1, ry2 - ry1
-        near_x1, near_x2 = rx1 - width, rx2 + width
-        near_y1, near_y2 = ry1 - 4 * height, ry2 + 4 * height
+        # A shot approaches the rim from above and falls just below it. The trigger
+        # region is generous above the rim (the incoming arc) but tight to the sides
+        # and only just below it — otherwise a ball dribbled in the backcourt drifts
+        # into an oversized neighbourhood and every pass is mistaken for a shot.
+        near_x1, near_x2 = rx1 - 0.5 * width, rx2 + 0.5 * width
+        near_y1, near_y2 = ry1 - 3 * height, ry2 + 1.5 * height
         i = 0
         while i < len(frames):
             cx, cy = frames[i].point

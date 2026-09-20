@@ -75,8 +75,12 @@ def main():
                     help="custom model for auto-rim detection ONLY (not the ball)")
     ap.add_argument("--player-model", default="yolov8x.pt")
     ap.add_argument("--ball-model", default=None,
-                    help="COCO ball model; default keeps HoopVision's yolov8x.pt "
-                         "(must detect COCO 'sports ball', NOT the custom rim model)")
+                    help="ball detection model; default keeps HoopVision's yolov8x.pt. "
+                         "Point at basketball_rim_best.pt with --ball-class 0 for a "
+                         "basketball-trained detector (much better ball recall).")
+    ap.add_argument("--ball-class", type=int, default=None,
+                    help="class id the ball model emits for the ball "
+                         "(COCO sports ball=32; basketball_rim_best basketball=0)")
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--court-length-ft", type=float, default=84.0)
     ap.add_argument("--max-frames", type=int, default=None)
@@ -113,6 +117,8 @@ def main():
     # checkpoint (yolov8x.pt); pointing it at the custom rim model detects no ball.
     if args.ball_model:
         cfg.detection.ball_model = args.ball_model
+    if args.ball_class is not None:
+        cfg.detection.ball_class = args.ball_class
     boxscore = hv_run(
         video=args.video, out_dir=str(out / "run"), calibration=str(calib_path),
         config=cfg, max_frames=args.max_frames,

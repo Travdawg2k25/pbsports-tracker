@@ -69,9 +69,12 @@ WORK_DIR.mkdir(parents=True, exist_ok=True)
 DEVICE = os.environ.get("HV_DEVICE", "cuda:0")
 RIM_MODEL = os.environ.get("HV_RIM_MODEL", "/opt/pbsports/basketball_rim_best.pt")
 PLAYER_MODEL = os.environ.get("HV_PLAYER_MODEL", "yolov8x.pt")
-# Optional COCO ball model. Left unset so HoopVision uses its own default (yolov8x.pt);
-# must be a COCO checkpoint, NOT the custom rim model (HoopVision filters class 32).
-BALL_MODEL = os.environ.get("HV_BALL_MODEL") or None
+# Ball detection model + class. The basketball-trained model gives far better ball
+# recall than COCO "sports ball", which is the main accuracy lever for made-shot / FG%.
+# Default to the rim model's "basketball" class (0); override to a COCO model + class 32
+# if preferred. HV_BALL_MODEL="" forces HoopVision's own yolov8x default.
+BALL_MODEL = os.environ.get("HV_BALL_MODEL", RIM_MODEL) or None
+BALL_CLASS = int(os.environ.get("HV_BALL_CLASS", "0"))
 COURT_LENGTH_FT = float(os.environ.get("HV_COURT_LENGTH_FT", "84.0"))
 MAX_FRAMES = int(os.environ["HV_MAX_FRAMES"]) if os.environ.get("HV_MAX_FRAMES") else None
 FFMPEG_BIN = os.environ.get("FFMPEG_BIN") or shutil.which("ffmpeg")
@@ -289,11 +292,12 @@ def do_analyze(job):
         cfg.detection.device = DEVICE
         cfg.detection.half = DEVICE != "cpu"
         cfg.detection.model = PLAYER_MODEL
-        # RIM_MODEL is used ONLY for auto-rim (above). HoopVision's ball detector
-        # filters for the COCO "sports ball" class, so the ball model must stay a COCO
-        # checkpoint — pointing it at the custom rim model detects zero ball frames.
+        # Ball detection: use the basketball-trained model + its class, so the ball
+        # track is clean enough for made-shot detection. detect_ball filters by
+        # cfg.detection.ball_class, so model and class must agree.
         if BALL_MODEL:
             cfg.detection.ball_model = BALL_MODEL
+            cfg.detection.ball_class = BALL_CLASS
         post_status(job_id, progress=15)
         boxscore = hv_run(
             video=str(vpath),

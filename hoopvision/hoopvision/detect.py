@@ -64,7 +64,7 @@ class Detector:
                 tile,
                 imgsz=self.cfg.ball_tile,
                 conf=self.cfg.ball_conf,
-                classes=[COCO_SPORTS_BALL],
+                classes=[self.cfg.ball_class],
                 device=self.cfg.device,
                 half=self.cfg.half,
                 verbose=False,

@@ -23,6 +23,10 @@ class DetectionConfig:
     ball_tile: int = 960
     ball_tile_overlap: int = 160
     ball_conf: float = 0.10
+    # Class id the ball model emits for the ball. Stock YOLO uses COCO "sports ball"
+    # (32); a fine-tuned basketball model (basketball_rim_best.pt) uses "basketball" (0).
+    # Pointing this at a basketball-specific class is the main ball-recall accuracy lever.
+    ball_class: int = 32
     # Only look for the ball inside the court polygon, dilated by this many pixels.
     ball_search_margin: int = 120
     device: str = "cpu"
