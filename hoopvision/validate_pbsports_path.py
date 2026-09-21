@@ -73,7 +73,10 @@ def main():
     ap.add_argument("video")
     ap.add_argument("--rim-model", default="/opt/pbsports/basketball_rim_best.pt",
                     help="custom model for auto-rim detection ONLY (not the ball)")
-    ap.add_argument("--player-model", default="yolov8x.pt")
+    ap.add_argument("--player-model", default="yolov8s.pt",
+                    help="player detector; yolov8s is ~5.7x faster than yolov8x on a T4 "
+                         "with negligible player-detection loss (players are large)")
+    ap.add_argument("--player-imgsz", type=int, default=1280)
     ap.add_argument("--ball-model", default=None,
                     help="ball detection model; default keeps HoopVision's yolov8x.pt. "
                          "Point at basketball_rim_best.pt with --ball-class 0 for a "
@@ -117,6 +120,7 @@ def main():
     cfg.detection.device = args.device
     cfg.detection.half = args.device != "cpu"
     cfg.detection.model = args.player_model
+    cfg.detection.player_imgsz = args.player_imgsz
     cfg.frame_stride = args.frame_stride
     # Scale frame-count thresholds so striding doesn't starve made-shot / possession
     # detection (they count sampled frames, each spanning frame_stride real frames).

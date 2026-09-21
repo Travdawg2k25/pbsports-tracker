@@ -68,7 +68,12 @@ WORK_DIR.mkdir(parents=True, exist_ok=True)
 
 DEVICE = os.environ.get("HV_DEVICE", "cuda:0")
 RIM_MODEL = os.environ.get("HV_RIM_MODEL", "/opt/pbsports/basketball_rim_best.pt")
-PLAYER_MODEL = os.environ.get("HV_PLAYER_MODEL", "yolov8x.pt")
+# Player model choice is THE throughput lever (measured on the T4 @ imgsz1536):
+# yolov8x 5.8fps, yolov8m 15.6fps, yolov8s 33fps, yolov8n 52fps. Players are large easy
+# targets (production uses yolov8n for its scan), so yolov8s gives ~5.7x speedup over the
+# yolov8x default at negligible player-detection cost. Ball stays on the basketball model.
+PLAYER_MODEL = os.environ.get("HV_PLAYER_MODEL", "yolov8s.pt")
+PLAYER_IMGSZ = int(os.environ.get("HV_PLAYER_IMGSZ", "1280"))
 # Ball detection model + class. The basketball-trained model gives far better ball
 # recall than COCO "sports ball", which is the main accuracy lever for made-shot / FG%.
 # Default to the rim model's "basketball" class (0); override to a COCO model + class 32
@@ -302,6 +307,7 @@ def do_analyze(job):
         cfg.detection.device = DEVICE
         cfg.detection.half = DEVICE != "cpu"
         cfg.detection.model = PLAYER_MODEL
+        cfg.detection.player_imgsz = PLAYER_IMGSZ
         cfg.frame_stride = FRAME_STRIDE
         # Made-shot detection counts descending *sampled* frames through the rim. Striding
         # makes each sampled frame span FRAME_STRIDE real frames, so the descent
