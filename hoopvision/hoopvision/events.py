@@ -254,6 +254,28 @@ def build_events(
 
     for rim in rims:
         shooter = last_possession_before(rim.frame)
+        is_ft = shooter is not None and _is_free_throw(
+            shooter, rim.frame, poss, rims, calib, cfg, fps
+        )
+        if is_ft:
+            # A free throw is one point and tracked separately from field goals.
+            shot = Event(
+                kind="free_throw_made" if rim.made else "free_throw_missed",
+                frame=rim.frame,
+                time_s=rim.frame / fps,
+                player=shooter.player if shooter else None,
+                track_id=shooter.track_id if shooter else None,
+                value=1 if rim.made else 0,
+                confidence=rim.confidence * 0.9,
+                detail={
+                    "hoop": rim.hoop,
+                    "free_throw": True,
+                    "shot_court_xy": list(shooter.court_xy) if shooter else None,
+                },
+            )
+            events.append(shot)
+            continue
+
         value = (
             shot_value(calib, shooter.court_xy, cfg.three_point_radius_ft) if shooter else 2
         )
@@ -277,6 +299,13 @@ def build_events(
             },
         )
         events.append(shot)
+
+        if not rim.made:
+            block = _detect_block(
+                shooter, rim, player_tracks, ball, calib, identities, cfg, fps
+            )
+            if block is not None:
+                events.append(block)
 
         if rim.made and shooter is not None:
             passer = _passer_before(poss, shooter, fps, cfg, rims)
@@ -374,3 +403,106 @@ def _turnovers(
             )
         )
     return out
+
+
+def _is_free_throw(
+    shooter: Possession,
+    frame: int,
+    poss: list[Possession],
+    rims: list[RimEvent],
+    calib: Calibration,
+    cfg: EventConfig,
+    fps: float,
+) -> bool:
+    """A shot is a free throw when it is taken from the FT line during dead-ball play.
+
+    Signals (all cheap, from data already computed):
+      * the shooter stands near the free-throw line (its distance from the baseline is
+        known: ``ft_line_ft``), and
+      * play was stopped beforehand — no rim interaction in the seconds prior, which is a
+        proxy for the whistle/dead ball that precedes a free throw.
+
+    Distance geometry is only trustworthy with a homography; without one we cannot tell a
+    free throw from a close jump shot, so we do not guess (returns False on the rim-only
+    path, and the shot counts as a normal field goal).
+    """
+    if not calib.distance_reliable:
+        return False
+    # Court x of the FT line for the shooter's end.
+    hoop = calib.nearest_hoop(shooter.court_xy)
+    baseline_x = 0.0 if hoop == "left" else calib.court_length_ft
+    inward = 1.0 if hoop == "left" else -1.0
+    ft_line_x = baseline_x + inward * calib.ft_line_ft
+    near_ft_line = abs(shooter.court_xy[0] - ft_line_x) <= cfg.free_throw_line_tol_ft
+    if not near_ft_line:
+        return False
+    # Dead ball before: no rim interaction in the window preceding the shot.
+    dead_window = cfg.free_throw_dead_s * fps
+    recent_rim = any(0 < frame - r.frame <= dead_window for r in rims)
+    return not recent_rim
+
+
+def _detect_block(
+    shooter: Possession | None,
+    rim: RimEvent,
+    player_tracks: list[Track],
+    ball: Track,
+    calib: Calibration,
+    identities: dict[int, tuple[str | None, str | None]],
+    cfg: EventConfig,
+    fps: float,
+) -> Event | None:
+    """A missed shot where a defender sat between shooter and rim is a likely block.
+
+    This is a deliberately low-confidence, single-camera heuristic: it flags a *candidate*
+    block for a human to confirm rather than asserting one. It fires only on missed shots
+    (a made basket was not blocked) when an opponent's feet fall between the shooter and
+    the rim around the shot frame.
+    """
+    if shooter is None or shooter.team is None:
+        return None
+    hoop_xy = calib.hoops.get(rim.hoop)
+    if hoop_xy is None:
+        return None
+    sx, sy = shooter.court_xy
+    hx, hy = hoop_xy
+    # Look for an opposing player whose court position lies between shooter and rim near
+    # the shot frame.
+    window = cfg.block_window_s * fps
+    seg_len = float(np.hypot(hx - sx, hy - sy)) or 1.0
+    best: tuple[float, int] | None = None
+    for t in player_tracks:
+        box = t.box_at(rim.frame)
+        if box is None:
+            # allow a nearby frame within the block window
+            near = [tf for tf in t.frames if abs(tf.frame - rim.frame) <= window]
+            if not near:
+                continue
+            box = min(near, key=lambda tf: abs(tf.frame - rim.frame)).box
+        px, py = calib.foot_point(box, rim.frame)
+        # Perpendicular distance of the player from the shooter->rim line.
+        # Project (p - s) onto (h - s); the residual is the gap.
+        t_proj = ((px - sx) * (hx - sx) + (py - sy) * (hy - sy)) / (seg_len**2)
+        if not (0.15 <= t_proj <= 0.95):  # between shooter and rim, not on top of either
+            continue
+        projx, projy = sx + t_proj * (hx - sx), sy + t_proj * (hy - sy)
+        gap = float(np.hypot(px - projx, py - projy))
+        if gap <= cfg.block_defender_gap_ft and (best is None or gap < best[0]):
+            best = (gap, t.track_id)
+    if best is None:
+        return None
+    blocker_id = best[1]
+    b_team, b_jersey = identities.get(blocker_id, (None, None))
+    if b_jersey:
+        blocker_key = f"{b_team or 'unknown'}:{b_jersey}"
+    else:
+        blocker_key = f"{b_team or 'unknown'}:t{blocker_id}"
+    return Event(
+        kind="block",
+        frame=rim.frame,
+        time_s=rim.frame / fps,
+        player=blocker_key,
+        track_id=blocker_id,
+        confidence=0.3,
+        detail={"shooter": shooter.player, "gap_ft": round(best[0], 1), "candidate": True},
+    )

@@ -25,11 +25,14 @@ class PlayerLine:
     fga: int = 0
     tpm: int = 0
     tpa: int = 0
+    ftm: int = 0
+    fta: int = 0
     rebounds: int = 0
     offensive_rebounds: int = 0
     defensive_rebounds: int = 0
     assists: int = 0
     steals: int = 0
+    blocks: int = 0
     turnovers: int = 0
     possessions: int = 0
     seconds_with_ball: float = 0.0
@@ -42,6 +45,10 @@ class PlayerLine:
     @property
     def tp_pct(self) -> float | None:
         return round(self.tpm / self.tpa, 3) if self.tpa else None
+
+    @property
+    def ft_pct(self) -> float | None:
+        return round(self.ftm / self.fta, 3) if self.fta else None
 
 
 def aggregate(events: list[Event], fps: float, roster: dict[str, str] | None = None) -> dict:
@@ -81,6 +88,14 @@ def aggregate(events: list[Event], fps: float, roster: dict[str, str] | None = N
                 pl.offensive_rebounds += 1
             else:
                 pl.defensive_rebounds += 1
+        elif ev.kind == "free_throw_made":
+            pl.ftm += 1
+            pl.fta += 1
+            pl.points += 1
+        elif ev.kind == "free_throw_missed":
+            pl.fta += 1
+        elif ev.kind == "block":
+            pl.blocks += 1
         elif ev.kind == "assist":
             pl.assists += 1
         elif ev.kind == "steal":
@@ -97,6 +112,7 @@ def aggregate(events: list[Event], fps: float, roster: dict[str, str] | None = N
         d = asdict(pl)
         d["fg_pct"] = pl.fg_pct
         d["tp_pct"] = pl.tp_pct
+        d["ft_pct"] = pl.ft_pct
         d["seconds_with_ball"] = round(pl.seconds_with_ball, 1)
         players.append(d)
 

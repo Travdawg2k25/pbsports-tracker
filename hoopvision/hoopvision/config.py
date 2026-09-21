@@ -89,6 +89,17 @@ class EventConfig:
     # Rebound: first player to gain possession within this window after a miss.
     rebound_window_s: float = 4.0
     assist_window_s: float = 3.0
+    # Free throw: a shot from near the FT line while the ball has been dead (no scoring
+    # for a stretch) and the shooter is uncontested. Worth 1 point, tracked separately
+    # from field goals. free_throw_line_tol_ft is how close to the 19 ft FT line the
+    # shooter must be; free_throw_dead_s is how long play must have been stopped before.
+    free_throw_line_tol_ft: float = 3.0
+    free_throw_dead_s: float = 2.0
+    free_throw_uncontested_ft: float = 5.0
+    # Block: a defender between shooter and rim when a shot's ball path stops advancing
+    # toward the rim. Low-confidence single-camera signal (verify in the UI).
+    block_defender_gap_ft: float = 4.0
+    block_window_s: float = 1.0
     clip_pre_s: float = 4.0
     clip_post_s: float = 3.0
 

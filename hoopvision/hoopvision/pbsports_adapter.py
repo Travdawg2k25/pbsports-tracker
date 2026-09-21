@@ -20,8 +20,8 @@ from __future__ import annotations
 
 from typing import Any
 
-# Stats HoopVision cannot observe from a single camera. Present as 0, not fabricated.
-_UNSUPPORTED = ("ft_makes", "ft_attempts", "passes", "blocks", "fouls")
+# Stats HoopVision still cannot observe from a single camera. Present as 0, not fabricated.
+_UNSUPPORTED = ("passes", "fouls")
 
 
 def _pct(makes: int, attempts: int) -> float | None:
@@ -85,6 +85,13 @@ def _player_line_to_pbsports(
             if line.get("turnovers")
             else None
         ),
+        # Free throws (1 pt each) — detected from FT-line shots during dead-ball play;
+        # best-effort and only when a homography makes the line geometry reliable.
+        "ft_makes": line.get("ftm", 0),
+        "ft_attempts": line.get("fta", 0),
+        "ft_pct": line.get("ft_pct"),
+        # Blocks — low-confidence single-camera candidate, for the parent to verify.
+        "blocks": line.get("blocks", 0),
         # Defense / streaks / efficiency HoopVision does not measure — reported as 0/None
         "steals": line.get("steals", 0),
         "consecutive_makes": 0,
@@ -97,7 +104,6 @@ def _player_line_to_pbsports(
     }
     for k in _UNSUPPORTED:
         row[k] = 0
-    row["ft_pct"] = None
     return row
 
 
@@ -112,6 +118,10 @@ def _best_effort_flags(distance_reliable: bool) -> dict[str, bool]:
         "turnovers": True,
         "steals": True,
         "rebounds": True,
+        # FT detection needs the FT-line geometry (homography); blocks are a deliberately
+        # low-confidence single-camera candidate. Both are always verify-me.
+        "ft": True,
+        "blocks": True,
     }
 
 
