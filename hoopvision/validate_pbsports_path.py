@@ -77,6 +77,9 @@ def main():
                     help="player detector; yolov8s is ~5.7x faster than yolov8x on a T4 "
                          "with negligible player-detection loss (players are large)")
     ap.add_argument("--player-imgsz", type=int, default=1280)
+    ap.add_argument("--no-stabilize", action="store_true",
+                    help="skip camera-motion estimation (CPU-heavy feature matching); "
+                         "use for a roughly static camera")
     ap.add_argument("--ball-model", default=None,
                     help="ball detection model; default keeps HoopVision's yolov8x.pt. "
                          "Point at basketball_rim_best.pt with --ball-class 0 for a "
@@ -138,7 +141,7 @@ def main():
         cfg.detection.ball_tiled = False
     boxscore = hv_run(
         video=args.video, out_dir=str(out / "run"), calibration=str(calib_path),
-        config=cfg, max_frames=args.max_frames,
+        config=cfg, max_frames=args.max_frames, stabilize=not args.no_stabilize,
     )
 
     focus_key = boxscore["players"][0]["player"] if boxscore["players"] else None

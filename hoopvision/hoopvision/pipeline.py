@@ -55,18 +55,23 @@ def run(
     dump_json(meta, out / "video.json")
     begin = STAGES.index(start_stage)
 
+    def _timed(name: str, fn):
+        t0 = time.time()
+        fn()
+        log.info("stage %s took %.1fs", name, time.time() - t0)
+
     if begin <= 0 and stabilize:
-        stage_motion(video, out, cfg, meta, max_frames)
+        _timed("motion", lambda: stage_motion(video, out, cfg, meta, max_frames))
     calib = load_calibration(calibration, out) if calibration else None
 
     if begin <= 1:
-        stage_track(video, out, cfg, calib, meta, max_frames)
+        _timed("track", lambda: stage_track(video, out, cfg, calib, meta, max_frames))
     if begin <= 2:
-        stage_teams(video, out, cfg)
+        _timed("teams", lambda: stage_teams(video, out, cfg))
     if begin <= 3:
-        stage_jersey(video, out, cfg)
+        _timed("jersey", lambda: stage_jersey(video, out, cfg))
     if begin <= 4:
-        stage_events(out, cfg, calib, meta)
+        _timed("events", lambda: stage_events(out, cfg, calib, meta))
     return stage_boxscore(out, meta, roster)
 
 
