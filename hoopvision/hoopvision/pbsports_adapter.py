@@ -135,6 +135,7 @@ def to_pbsports_stats(
     player_name: str | None = None,
     duration_sec: float | None = None,
     total_frames: int | None = None,
+    scoreboard: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the pbsports ``stats.json`` dict from a HoopVision ``boxscore.json`` dict.
 
@@ -170,7 +171,7 @@ def to_pbsports_stats(
     frames = total_frames if total_frames is not None else video.get("frame_count", 0)
     score = {tid: t["points"] for tid, t in teams_out.items()}
 
-    return {
+    out: dict[str, Any] = {
         "game_id": game_id,
         "duration_sec": round(dur, 2) if dur else 0.0,
         "total_frames": frames,
@@ -181,3 +182,8 @@ def to_pbsports_stats(
         "distance_reliable": distance_reliable,
         "source": "hoopvision",
     }
+    # Scoreboard truth (when readable): authoritative team totals + unaccounted points the
+    # UI can prompt a human to assign. Never overrides detected individual stats.
+    if scoreboard is not None:
+        out["scoreboard"] = scoreboard
+    return out

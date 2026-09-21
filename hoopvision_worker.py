@@ -96,6 +96,12 @@ FRAME_STRIDE = int(os.environ.get("HV_FRAME_STRIDE", "1"))
 # 32min run). Estimating it every Nth frame (drift is smooth; nearest homography is
 # reused between) cuts that ~5x WITHOUT touching detection/tracking. The big lever.
 MOTION_STRIDE = int(os.environ.get("HV_MOTION_STRIDE", "5"))
+# Scoreboard truing: OCR the score (full-frame for now) to reconcile detected team points
+# against ground truth. Off by default because a full-frame OCR pass costs time and only
+# helps when the scoreboard is legible; enable per-camera once a scoreboard region is
+# markable. HV_SCOREBOARD=1 to turn on.
+SCOREBOARD_ENABLED = os.environ.get("HV_SCOREBOARD", "0") == "1"
+SCOREBOARD_SAMPLE_S = float(os.environ.get("HV_SCOREBOARD_SAMPLE_S", "5.0"))
 FFMPEG_BIN = os.environ.get("FFMPEG_BIN") or shutil.which("ffmpeg")
 
 HEADERS = {"X-Worker-Secret": WORKER_SECRET}
@@ -282,6 +288,7 @@ def do_analyze(job):
     from hoopvision.config import Config
     from hoopvision.pbsports_adapter import to_pbsports_stats
     from hoopvision.pipeline import run as hv_run
+    from hoopvision.scoreboard import read_scoreboard, reconcile
     from hoopvision.types import Event, load_json
     from hoopvision.video import probe
 
@@ -343,6 +350,23 @@ def do_analyze(job):
         # 3. Translate to the pbsports stats.json shape, stamping parent jersey/name
         #    onto the top-scoring player (the one the parent selected/filmed).
         focus_key = boxscore["players"][0]["player"] if boxscore["players"] else None
+
+        # 2b. Scoreboard truing (best-effort): read the score when legible and reconcile
+        #     it against detected team points. No marked region yet -> full-frame OCR.
+        scoreboard_block = None
+        if SCOREBOARD_ENABLED:
+            try:
+                sb = read_scoreboard(
+                    str(vpath), None, meta.fps, gpu=DEVICE != "cpu",
+                    sample_every_s=SCOREBOARD_SAMPLE_S,
+                )
+                detected_team_points = {
+                    tid: t.get("points", 0) for tid, t in boxscore.get("teams", {}).items()
+                }
+                scoreboard_block = reconcile(sb, detected_team_points)
+            except Exception as exc:  # noqa: BLE001 - scoreboard is best-effort
+                log.warning("scoreboard read failed (non-fatal): %s", exc)
+
         stats = to_pbsports_stats(
             boxscore,
             game_id=job_id,
@@ -352,6 +376,7 @@ def do_analyze(job):
             player_name=player_name,
             duration_sec=meta.duration_s,
             total_frames=meta.frame_count,
+            scoreboard=scoreboard_block,
         )
         stats_path = td / "stats.json"
         stats_path.write_text(json.dumps(stats, default=str, indent=2))
