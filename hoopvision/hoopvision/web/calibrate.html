@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>hoopvision — calibrate</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 14px/1.45 system-ui, sans-serif; background: #12141a; color: #e8eaf0; }
+  header { padding: 12px 20px; border-bottom: 1px solid #262a35; }
+  main { display: grid; grid-template-columns: 1fr 300px; gap: 0; height: calc(100vh - 49px); }
+  #stage { position: relative; overflow: auto; background: #000; }
+  #frame { display: block; max-width: 100%; }
+  #overlay { position: absolute; inset: 0; pointer-events: none; }
+  aside { border-left: 1px solid #262a35; padding: 16px; overflow-y: auto; }
+  .item { padding: 8px 10px; border-radius: 6px; cursor: pointer; border: 1px solid #242936; margin-bottom: 6px; }
+  .item.done { border-color: #2e6b46; }
+  .item.active { background: #23304a; }
+  .muted { color: #8a91a3; font-size: 12px; }
+  button { background: #2d5fd0; color: #fff; border: 0; padding: 9px 14px; border-radius: 6px; cursor: pointer; width: 100%; margin-top: 10px; }
+  button.secondary { background: #262b38; }
+  select { width: 100%; margin: 4px 0 12px; padding: 7px; background: #1a1e28; color: #e8eaf0; border: 1px solid #262a35; border-radius: 6px; }
+  #status { margin-top: 10px; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>Click the highlighted landmark on the frame. At least 4 court landmarks, plus a
+  box around each rim (click top-left then bottom-right). A camera framed on one basket
+  can use that end's lane and free-throw line on their own.</header>
+<main>
+  <div id="stage"><img id="frame" src="/frame.jpg" /><svg id="overlay"></svg></div>
+  <aside>
+    <label class="muted" for="court">Court</label>
+    <select id="court">
+      <option value="94">Full size — 94 ft (NBA / college)</option>
+      <option value="84">High school — 84 ft</option>
+    </select>
+    <div id="list"></div>
+    <div class="muted" id="hint"></div>
+    <button id="save">Save calibration</button>
+    <button id="undo" class="secondary">Undo last point</button>
+    <div id="status"></div>
+  </aside>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+let landmarks = {}, points = {}, rims = {}, pending = [], targets = [], current = 0, history = [];
+
+function courtLength() { return parseFloat($('#court').value); }
+
+async function init() {
+  landmarks = await (await fetch(`/api/landmarks?court_length_ft=${courtLength()}`)).json();
+  targets = [...Object.keys(landmarks), 'rim:left:topleft', 'rim:left:bottomright',
+             'rim:right:topleft', 'rim:right:bottomright'];
+  render();
+}
+
+$('#court').onchange = init;
+
+function render() {
+  $('#list').innerHTML = targets.map((t, i) => {
+    const done = t.startsWith('rim:') ? pending.some(p => p.target === t) : t in points;
+    return `<div class="item ${done ? 'done' : ''} ${i === current ? 'active' : ''}" data-i="${i}">
+      ${t.replace(/_/g, ' ').replace('rim:', 'rim ')}</div>`;
+  }).join('');
+  document.querySelectorAll('.item').forEach(el => el.onclick = () => { current = +el.dataset.i; render(); });
+  $('#hint').textContent = `${Object.keys(points).length} landmarks · ${Object.keys(rims).length} rims marked`;
+  drawOverlay();
+}
+
+$('#frame').addEventListener('click', ev => {
+  const img = $('#frame');
+  const rect = img.getBoundingClientRect();
+  const scale = img.naturalWidth / rect.width;
+  const x = (ev.clientX - rect.left) * scale;
+  const y = (ev.clientY - rect.top) * scale;
+  const target = targets[current];
+  if (target.startsWith('rim:')) {
+    pending = pending.filter(p => p.target !== target).concat([{ target, x, y }]);
+    syncRims();
+  } else {
+    points[target] = [x, y];
+  }
+  history = history.filter(t => t !== target).concat([target]);
+  current = Math.min(current + 1, targets.length - 1);
+  render();
+});
+
+// A rim box exists only while both of its corners do.
+function syncRims() {
+  for (const side of ['left', 'right']) {
+    const tl = pending.find(p => p.target === `rim:${side}:topleft`);
+    const br = pending.find(p => p.target === `rim:${side}:bottomright`);
+    if (tl && br) rims[side] = [tl.x, tl.y, br.x, br.y];
+    else delete rims[side];
+  }
+}
+
+function drawOverlay() {
+  const img = $('#frame');
+  const rect = img.getBoundingClientRect();
+  const scale = rect.width / (img.naturalWidth || 1);
+  const svg = $('#overlay');
+  svg.setAttribute('width', rect.width); svg.setAttribute('height', rect.height);
+  const marks = Object.entries(points).map(([k, [x, y]]) =>
+    `<circle cx="${x*scale}" cy="${y*scale}" r="5" fill="#4ade80" /><text x="${x*scale+8}" y="${y*scale+4}" fill="#4ade80" font-size="11">${k}</text>`);
+  const boxes = Object.entries(rims).map(([k, [x1,y1,x2,y2]]) =>
+    `<rect x="${x1*scale}" y="${y1*scale}" width="${(x2-x1)*scale}" height="${(y2-y1)*scale}" fill="none" stroke="#f59e0b" stroke-width="2" />`);
+  svg.innerHTML = marks.concat(boxes).join('');
+}
+
+$('#undo').onclick = () => {
+  const target = history.pop();
+  if (!target) return;
+  delete points[target];
+  pending = pending.filter(p => p.target !== target);
+  syncRims();
+  current = Math.max(0, targets.indexOf(target));
+  render();
+};
+
+$('#save').onclick = async () => {
+  const res = await fetch('/api/calibration', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ image_points: points, rim_boxes: rims, court_length_ft: courtLength() }),
+  });
+  const body = await res.json();
+  $('#status').textContent = res.ok ? `Saved to ${body.saved}` : `Error: ${body.detail}`;
+  $('#status').style.color = res.ok ? '#4ade80' : '#f87171';
+};
+
+window.addEventListener('resize', drawOverlay);
+$('#frame').addEventListener('load', drawOverlay);
+init();
+</script>
+</body>
+</html>

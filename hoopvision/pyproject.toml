@@ -1,0 +1,43 @@
+[project]
+name = "hoopvision"
+version = "0.1.0"
+description = "Single-camera basketball tracking, jersey OCR and box score"
+requires-python = ">=3.10"
+dependencies = [
+    "ultralytics>=8.3",
+    "opencv-python-headless>=4.9",
+    "easyocr>=1.7",
+    "numpy<2",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.6",
+    "lap>=0.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4", "httpx>=0.27"]
+# The pbsports GPU worker (hoopvision_worker.py) also needs S3 + HTTP; keep them out of
+# the core package (which does neither) and install with: pip install -e ".[worker]"
+worker = ["boto3>=1.34", "requests>=2.31", "imageio-ffmpeg>=0.5"]
+
+[project.scripts]
+hoopvision = "hoopvision.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["hoopvision*"]
+
+[tool.setuptools.package-data]
+hoopvision = ["web/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

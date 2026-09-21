@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>hoopvision — box score</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 14px/1.45 system-ui, sans-serif; background: #12141a; color: #e8eaf0; }
+  header { padding: 14px 20px; border-bottom: 1px solid #262a35; display: flex; gap: 16px; align-items: baseline; }
+  h1 { font-size: 16px; margin: 0; letter-spacing: .02em; }
+  .muted { color: #8a91a3; }
+  main { display: grid; grid-template-columns: 340px 1fr; gap: 0; height: calc(100vh - 53px); }
+  #roster { overflow-y: auto; border-right: 1px solid #262a35; }
+  .team-head { padding: 10px 16px; font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: .08em; color: #8a91a3; background: #171a22; position: sticky; top: 0; }
+  .player { display: flex; align-items: center; gap: 12px; padding: 10px 16px; cursor: pointer; border-bottom: 1px solid #1c2029; }
+  .player:hover { background: #1b1f29; }
+  .player.active { background: #23304a; }
+  .num { font-variant-numeric: tabular-nums; font-weight: 700; width: 34px; text-align: center; background: #262b38; border-radius: 6px; padding: 3px 0; }
+  .pts { margin-left: auto; font-variant-numeric: tabular-nums; }
+  #detail { overflow-y: auto; padding: 20px 24px; }
+  .statgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; margin: 16px 0 24px; }
+  .stat { background: #181c25; border: 1px solid #242936; border-radius: 8px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .stat span { color: #8a91a3; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #1f2430; font-variant-numeric: tabular-nums; }
+  th { color: #8a91a3; font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  tr.clip:hover { background: #1b1f29; cursor: pointer; }
+  .tag { font-size: 11px; padding: 2px 7px; border-radius: 999px; background: #262b38; }
+  .tag.made { background: #1d4d33; }
+  .tag.missed { background: #4d2222; }
+  .conf { color: #8a91a3; }
+  video { width: 100%; max-width: 720px; background: #000; border-radius: 8px; }
+  .empty { color: #8a91a3; padding: 40px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>hoopvision</h1>
+  <span class="muted" id="summary">loading…</span>
+</header>
+<main>
+  <div id="roster"></div>
+  <div id="detail"><p class="empty">Pick a player to see their stats and the clips behind every number.</p></div>
+</main>
+<script>
+const $ = (s, r=document) => r.querySelector(s);
+let box = null, active = null;
+
+async function load() {
+  box = await (await fetch('/api/boxscore')).json();
+  const teams = Object.entries(box.teams).map(([t, s]) => `${t} ${s.points}`).join(' · ');
+  $('#summary').textContent = `${teams} · ${box.players.length} players identified · ${(box.video.duration_s/60).toFixed(1)} min`;
+  renderRoster();
+}
+
+function renderRoster() {
+  const byTeam = {};
+  for (const p of box.players) (byTeam[p.team || 'unidentified'] ??= []).push(p);
+  $('#roster').innerHTML = Object.entries(byTeam).map(([team, players]) => `
+    <div class="team-head">${team}</div>
+    ${players.map(p => `
+      <div class="player" data-player="${p.player}">
+        <span class="num">${p.jersey ?? '—'}</span>
+        <span>${p.name ?? 'Unnamed'}</span>
+        <span class="pts">${p.points} pts</span>
+      </div>`).join('')}
+  `).join('');
+  for (const el of document.querySelectorAll('.player')) {
+    el.onclick = () => selectPlayer(el.dataset.player, el);
+  }
+}
+
+async function selectPlayer(key, el) {
+  document.querySelectorAll('.player').forEach(e => e.classList.remove('active'));
+  el?.classList.add('active');
+  active = key;
+  const data = await (await fetch(`/api/players/${encodeURIComponent(key)}`)).json();
+  const s = data.stats;
+  const stat = (label, value) => `<div class="stat"><b>${value ?? '—'}</b><span>${label}</span></div>`;
+  $('#detail').innerHTML = `
+    <h2 style="margin:0">#${s.jersey ?? '—'} ${s.name ?? ''} <span class="muted">${s.team ?? ''}</span></h2>
+    <div class="statgrid">
+      ${stat('points', s.points)}
+      ${stat('fg', `${s.fgm}/${s.fga}`)}
+      ${stat('3pt', `${s.tpm}/${s.tpa}`)}
+      ${stat('reb', s.rebounds)}
+      ${stat('ast', s.assists)}
+      ${stat('stl', s.steals)}
+      ${stat('tov', s.turnovers)}
+      ${stat('touches', s.possessions)}
+      ${stat('ball time', s.seconds_with_ball + 's')}
+    </div>
+    <video id="player" controls preload="metadata" src="/video"></video>
+    <h3>Clips (${data.clips.length})</h3>
+    <table>
+      <thead><tr><th>time</th><th>event</th><th>detail</th><th>conf</th></tr></thead>
+      <tbody>${data.clips.map(c => `
+        <tr class="clip" data-start="${c.start_s}">
+          <td>${fmt(c.time_s)}</td>
+          <td><span class="tag ${c.kind === 'shot_made' ? 'made' : c.kind === 'shot_missed' ? 'missed' : ''}">${c.kind.replace('_', ' ')}</span></td>
+          <td class="muted">${describe(c)}</td>
+          <td class="conf">${c.confidence}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+  for (const row of document.querySelectorAll('tr.clip')) {
+    row.onclick = () => { const v = $('#player'); v.currentTime = Number(row.dataset.start); v.play(); };
+  }
+}
+
+function describe(c) {
+  const d = c.detail || {};
+  if (c.kind.startsWith('shot')) return `${d.attempt_value ?? 2}pt from ${d.shot_distance_ft ?? '?'} ft`;
+  if (c.kind === 'rebound') return d.type ?? '';
+  if (c.kind === 'assist') return `to ${d.shooter ?? '?'}`;
+  if (c.kind === 'turnover') return `to ${d.stolen_by ?? '?'}`;
+  if (c.kind === 'steal') return `from ${d.from ?? '?'}`;
+  return '';
+}
+
+const fmt = s => `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+load();
+</script>
+</body>
+</html>
