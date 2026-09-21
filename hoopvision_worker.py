@@ -304,7 +304,7 @@ def do_analyze(job):
 
     # HoopVision package (installed in the box venv this worker runs under).
     from hoopvision.autorim import AutoRimConfig, detect_rims
-    from hoopvision.boxscore import player_clips
+    from hoopvision.boxscore import highlight_clips
     from hoopvision.config import Config
     from hoopvision.pbsports_adapter import to_pbsports_stats
     from hoopvision.pipeline import run as hv_run
@@ -407,7 +407,7 @@ def do_analyze(job):
         reel_keys = {}
         if focus_key:
             events = [Event(**e) for e in load_json(td / "run" / "events.json")]
-            clips = player_clips(events, focus_key, meta.fps, cfg.events)
+            clips = highlight_clips(events, focus_key, meta.fps, cfg.events)
             frames = _gather_clip_frames(str(vpath), clips, meta.fps)
             if frames:
                 # Use the focus player's own track_id key for the reel filename.

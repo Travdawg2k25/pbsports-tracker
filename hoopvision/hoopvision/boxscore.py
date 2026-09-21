@@ -152,6 +152,60 @@ def player_clips(
     return out
 
 
+def highlight_clips(
+    events: list[Event],
+    player: str,
+    fps: float,
+    cfg: EventConfig | None = None,
+    max_clips: int = 6,
+) -> list[dict[str, Any]]:
+    """Clip windows for a reel — scoring plays if any, else top-activity moments.
+
+    The primary reel is the player's scored events (shots, rebounds, assists, etc.). When
+    footage yields none of those (e.g. a wide broadcast angle where made shots aren't
+    detected), a parent should still get *something*, so we fall back to the player's
+    busiest moments: the frames where their events (including possessions) cluster
+    densest. Marked ``fallback`` so the UI can label them "activity" rather than a made
+    basket it can't verify.
+    """
+    scoring = player_clips(events, player, fps, cfg)
+    if scoring:
+        return scoring
+    cfg = cfg or EventConfig()
+    # Fallback: rank this player's moments (any event, incl. possessions) and clip the
+    # densest windows so the reel captures where they were most involved.
+    times = sorted(ev.time_s for ev in events if ev.player == player)
+    if not times:
+        return []
+    # Cluster nearby moments (within a clip span) into windows, then take the busiest.
+    span = cfg.clip_pre_s + cfg.clip_post_s
+    windows: list[tuple[float, float, int]] = []  # (start_time, end_time, count)
+    cluster = [times[0]]
+    for t in times[1:]:
+        if t - cluster[-1] <= span:
+            cluster.append(t)
+        else:
+            windows.append((cluster[0], cluster[-1], len(cluster)))
+            cluster = [t]
+    windows.append((cluster[0], cluster[-1], len(cluster)))
+    windows.sort(key=lambda w: w[2], reverse=True)  # busiest first
+    out = []
+    for start_t, end_t, count in windows[:max_clips]:
+        mid = (start_t + end_t) / 2
+        out.append(
+            {
+                "kind": "activity",
+                "time_s": round(mid, 2),
+                "start_s": round(max(0.0, start_t - cfg.clip_pre_s), 2),
+                "end_s": round(end_t + cfg.clip_post_s, 2),
+                "value": 0,
+                "confidence": 0.2,
+                "detail": {"fallback": True, "event_count": count},
+            }
+        )
+    return sorted(out, key=lambda c: c["start_s"])
+
+
 def load_roster(path: str | Path | None) -> dict[str, str]:
     """Roster file maps ``{"home:23": "A. Smith"}``."""
     if path is None:

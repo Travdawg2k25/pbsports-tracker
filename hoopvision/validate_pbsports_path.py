@@ -28,7 +28,7 @@ import cv2
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 from hoopvision.autorim import AutoRimConfig, detect_rims
-from hoopvision.boxscore import player_clips
+from hoopvision.boxscore import highlight_clips
 from hoopvision.config import Config
 from hoopvision.pbsports_adapter import to_pbsports_stats
 from hoopvision.pipeline import run as hv_run
@@ -167,8 +167,9 @@ def main():
     print("== H.264 reel ==")
     if focus_key:
         events = [Event(**e) for e in load_json(out / "run" / "events.json")]
-        clips = player_clips(events, focus_key, meta.fps, cfg.events)
-        print(f"clip windows: {len(clips)}")
+        clips = highlight_clips(events, focus_key, meta.fps, cfg.events)
+        n_fallback = sum(1 for c in clips if c.get("detail", {}).get("fallback"))
+        print(f"clip windows: {len(clips)} ({n_fallback} activity-fallback)")
         frames = gather_clip_frames(args.video, clips, meta.fps)
         reel = out / "reel_focus.mp4"
         ok, how = write_h264(frames, reel, meta.fps, (meta.width, meta.height))
