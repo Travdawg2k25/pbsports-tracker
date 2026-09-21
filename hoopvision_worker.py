@@ -92,6 +92,10 @@ MAX_FRAMES = int(os.environ["HV_MAX_FRAMES"]) if os.environ.get("HV_MAX_FRAMES")
 # phantom turnovers/steals. So striding is NOT a usable throughput lever here; default 1.
 # Throughput comes instead from single-pass ball detection and dead-ball segment skipping.
 FRAME_STRIDE = int(os.environ.get("HV_FRAME_STRIDE", "1"))
+# Motion estimation is CPU feature-matching that dominated runtime (~77% / ~25min of a
+# 32min run). Estimating it every Nth frame (drift is smooth; nearest homography is
+# reused between) cuts that ~5x WITHOUT touching detection/tracking. The big lever.
+MOTION_STRIDE = int(os.environ.get("HV_MOTION_STRIDE", "5"))
 FFMPEG_BIN = os.environ.get("FFMPEG_BIN") or shutil.which("ffmpeg")
 
 HEADERS = {"X-Worker-Secret": WORKER_SECRET}
@@ -309,6 +313,7 @@ def do_analyze(job):
         cfg.detection.model = PLAYER_MODEL
         cfg.detection.player_imgsz = PLAYER_IMGSZ
         cfg.frame_stride = FRAME_STRIDE
+        cfg.motion_stride = MOTION_STRIDE
         # Made-shot detection counts descending *sampled* frames through the rim. Striding
         # makes each sampled frame span FRAME_STRIDE real frames, so the descent
         # requirement must scale down or real makes are missed. A shot descends through

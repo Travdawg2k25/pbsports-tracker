@@ -99,8 +99,15 @@ class Config:
     track: TrackConfig = field(default_factory=TrackConfig)
     jersey: JerseyConfig = field(default_factory=JerseyConfig)
     events: EventConfig = field(default_factory=EventConfig)
-    # Process every Nth frame. 2 is plenty at 60 fps, 1 at 30 fps.
+    # Process every Nth frame for DETECTION. Keep at 1: striding fragments the tracker
+    # (measured 85->147 tracks at stride 2), so it is not a usable throughput lever.
     frame_stride: int = 1
+    # Process every Nth frame for MOTION estimation only. Camera drift is smooth, so
+    # matching features every Nth frame and reusing the homography in between is
+    # accurate enough — and motion estimation is CPU feature-matching that dominates
+    # runtime (measured ~77% of a full run), so this is the main throughput lever.
+    # Unlike frame_stride this does NOT touch detection/tracking, so it is safe.
+    motion_stride: int = 5
 
     @classmethod
     def load(cls, path: str | Path | None) -> Config:

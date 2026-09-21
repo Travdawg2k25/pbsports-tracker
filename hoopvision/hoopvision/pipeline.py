@@ -79,7 +79,9 @@ def stage_motion(
     video: str | Path, out: Path, cfg: Config, meta: VideoMeta, max_frames: int | None
 ) -> Motion:
     end = None if max_frames is None else max_frames - 1
-    motion = estimate_motion(video, stride=cfg.frame_stride, end=end)
+    # Motion is CPU feature-matching and dominates runtime; estimate it every
+    # motion_stride frames (camera drift is smooth enough to interpolate between).
+    motion = estimate_motion(video, stride=max(cfg.frame_stride, cfg.motion_stride), end=end)
     moved = displacement(motion, meta.width, meta.height)
     log.info("camera motion: %.0f px peak frame-centre displacement", moved)
     if moved < STATIC_CAMERA_PX:

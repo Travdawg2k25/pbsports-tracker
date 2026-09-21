@@ -16,12 +16,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 import cv2
+
+# Surface the pipeline's INFO logs (per-stage timings, ball frames, etc.)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 from hoopvision.autorim import AutoRimConfig, detect_rims
 from hoopvision.boxscore import player_clips
@@ -80,6 +84,9 @@ def main():
     ap.add_argument("--no-stabilize", action="store_true",
                     help="skip camera-motion estimation (CPU-heavy feature matching); "
                          "use for a roughly static camera")
+    ap.add_argument("--motion-stride", type=int, default=5,
+                    help="estimate camera motion every Nth frame (CPU feature-matching "
+                         "dominates runtime; higher=faster, drift interpolated between)")
     ap.add_argument("--ball-model", default=None,
                     help="ball detection model; default keeps HoopVision's yolov8x.pt. "
                          "Point at basketball_rim_best.pt with --ball-class 0 for a "
@@ -125,6 +132,7 @@ def main():
     cfg.detection.model = args.player_model
     cfg.detection.player_imgsz = args.player_imgsz
     cfg.frame_stride = args.frame_stride
+    cfg.motion_stride = args.motion_stride
     # Scale frame-count thresholds so striding doesn't starve made-shot / possession
     # detection (they count sampled frames, each spanning frame_stride real frames).
     if args.frame_stride > 1:
