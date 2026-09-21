@@ -85,8 +85,10 @@ def main():
     ap.add_argument("--court-length-ft", type=float, default=84.0)
     ap.add_argument("--max-frames", type=int, default=None)
     ap.add_argument("--frame-stride", type=int, default=1,
-                    help="process every Nth frame (throughput lever; higher=faster but "
-                         "sparser tracks, which can hurt made-shot detection)")
+                    help="process every Nth frame (MEASURED to fragment the tracker; keep 1)")
+    ap.add_argument("--no-ball-tiling", action="store_true",
+                    help="single full-frame ball pass instead of tiling (faster; fine for "
+                         "a basketball-trained ball model)")
     ap.add_argument("--jersey", default=None)
     ap.add_argument("--name", default=None)
     ap.add_argument("--out", default="runs/pbtest")
@@ -128,6 +130,8 @@ def main():
         cfg.detection.ball_model = args.ball_model
     if args.ball_class is not None:
         cfg.detection.ball_class = args.ball_class
+    if args.no_ball_tiling:
+        cfg.detection.ball_tiled = False
     boxscore = hv_run(
         video=args.video, out_dir=str(out / "run"), calibration=str(calib_path),
         config=cfg, max_frames=args.max_frames,

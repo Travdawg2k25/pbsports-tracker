@@ -75,12 +75,18 @@ PLAYER_MODEL = os.environ.get("HV_PLAYER_MODEL", "yolov8x.pt")
 # if preferred. HV_BALL_MODEL="" forces HoopVision's own yolov8x default.
 BALL_MODEL = os.environ.get("HV_BALL_MODEL", RIM_MODEL) or None
 BALL_CLASS = int(os.environ.get("HV_BALL_CLASS", "0"))
+# Single-pass ball detection (no tiling) — the main throughput lever that doesn't touch
+# the tracker. A basketball-trained model finds the ball in one full-frame pass, avoiding
+# the several-inferences-per-frame tiling cost. Default on for the basketball model.
+BALL_TILED = os.environ.get("HV_BALL_TILED", "0") == "1"
 COURT_LENGTH_FT = float(os.environ.get("HV_COURT_LENGTH_FT", "84.0"))
 MAX_FRAMES = int(os.environ["HV_MAX_FRAMES"]) if os.environ.get("HV_MAX_FRAMES") else None
-# Process every Nth frame — the main throughput lever. Measured: stride 3 fragments the
-# ByteTrack player tracker (3-frame jumps break IoU association -> broken tracks -> no
-# possessions), so 2 is the safe ceiling for this tracker. Detection cost still ~halves.
-FRAME_STRIDE = int(os.environ.get("HV_FRAME_STRIDE", "2"))
+# Process every Nth frame. MEASURED: striding fragments the ByteTrack player tracker
+# badly — stride 2 gave 147 tracks and stride 3 gave 134, vs 85 at stride 1, because the
+# IoU association can't match players across multi-frame jumps. The fragments inflate
+# phantom turnovers/steals. So striding is NOT a usable throughput lever here; default 1.
+# Throughput comes instead from single-pass ball detection and dead-ball segment skipping.
+FRAME_STRIDE = int(os.environ.get("HV_FRAME_STRIDE", "1"))
 FFMPEG_BIN = os.environ.get("FFMPEG_BIN") or shutil.which("ffmpeg")
 
 HEADERS = {"X-Worker-Secret": WORKER_SECRET}
@@ -312,6 +318,7 @@ def do_analyze(job):
         if BALL_MODEL:
             cfg.detection.ball_model = BALL_MODEL
             cfg.detection.ball_class = BALL_CLASS
+        cfg.detection.ball_tiled = BALL_TILED
         post_status(job_id, progress=15)
         boxscore = hv_run(
             video=str(vpath),

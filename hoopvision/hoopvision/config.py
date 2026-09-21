@@ -27,6 +27,12 @@ class DetectionConfig:
     # (32); a fine-tuned basketball model (basketball_rim_best.pt) uses "basketball" (0).
     # Pointing this at a basketball-specific class is the main ball-recall accuracy lever.
     ball_class: int = 32
+    # Tiling the frame into native-res crops is what lets a stock model see a tiny ball on
+    # a 4K frame, but it runs several inferences per frame. A basketball-trained model
+    # detects the ball on the whole (downscaled) frame in ONE pass — far cheaper and the
+    # main throughput lever. Set False to skip tiling and do a single full-frame ball pass.
+    ball_tiled: bool = True
+    ball_imgsz: int = 1280
     # Only look for the ball inside the court polygon, dilated by this many pixels.
     ball_search_margin: int = 120
     device: str = "cpu"

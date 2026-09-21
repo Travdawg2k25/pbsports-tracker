@@ -56,6 +56,8 @@ class Detector:
         return out
 
     def detect_ball(self, frame: np.ndarray) -> list[Detection]:
+        if not self.cfg.ball_tiled:
+            return self._detect_ball_single(frame)
         h, w = frame.shape[:2]
         region = self._search_region(w, h)
         best: Detection | None = None
@@ -81,6 +83,25 @@ class Detector:
                     best = det
         # There is exactly one game ball; keeping only the best candidate per frame keeps
         # the ball tracker from latching onto a ball rack on the sideline.
+        return [best] if best else []
+
+    def _detect_ball_single(self, frame: np.ndarray) -> list[Detection]:
+        """One full-frame ball inference (no tiling) — the fast path for a ball-trained
+        model. Keeps only the single highest-confidence ball, same as the tiled path."""
+        res = self.ball_model.predict(
+            frame,
+            imgsz=self.cfg.ball_imgsz,
+            conf=self.cfg.ball_conf,
+            classes=[self.cfg.ball_class],
+            device=self.cfg.device,
+            half=self.cfg.half,
+            verbose=False,
+        )[0]
+        best: Detection | None = None
+        for box, conf in zip(res.boxes.xyxy.tolist(), res.boxes.conf.tolist(), strict=True):
+            det = Detection(box=tuple(box), conf=float(conf), cls="ball")
+            if best is None or det.conf > best.conf:
+                best = det
         return [best] if best else []
 
     def _search_region(self, w: int, h: int) -> Box:
