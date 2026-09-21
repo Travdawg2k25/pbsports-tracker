@@ -18,6 +18,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.4", "httpx>=0.27"]
+# The pbsports GPU worker (hoopvision_worker.py) also needs S3 + HTTP; keep them out of
+# the core package (which does neither) and install with: pip install -e ".[worker]"
+worker = ["boto3>=1.34", "requests>=2.31", "imageio-ffmpeg>=0.5"]
 
 [project.scripts]
 hoopvision = "hoopvision.cli:main"

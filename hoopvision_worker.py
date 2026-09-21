@@ -102,7 +102,27 @@ MOTION_STRIDE = int(os.environ.get("HV_MOTION_STRIDE", "5"))
 # markable. HV_SCOREBOARD=1 to turn on.
 SCOREBOARD_ENABLED = os.environ.get("HV_SCOREBOARD", "0") == "1"
 SCOREBOARD_SAMPLE_S = float(os.environ.get("HV_SCOREBOARD_SAMPLE_S", "5.0"))
-FFMPEG_BIN = os.environ.get("FFMPEG_BIN") or shutil.which("ffmpeg")
+def _resolve_ffmpeg() -> str | None:
+    """ffmpeg for H.264 transcode: explicit env, then PATH, then imageio-ffmpeg's binary.
+
+    Most GPU boxes have no system ffmpeg, but imageio-ffmpeg (a worker dep) ships a static
+    one — use it so reels are always browser-playable H.264 without manual setup.
+    """
+    explicit = os.environ.get("FFMPEG_BIN")
+    if explicit:
+        return explicit
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+FFMPEG_BIN = _resolve_ffmpeg()
 
 HEADERS = {"X-Worker-Secret": WORKER_SECRET}
 s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-east-2"))
