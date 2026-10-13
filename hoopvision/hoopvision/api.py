@@ -88,7 +88,8 @@ def create_app(
         for p in box["players"]:
             if p["player"] == player:
                 fps = box["video"]["fps"]
-                return {"stats": p, "clips": player_clips(events(), player, fps, Config().events)}
+                final = apply_edits(events(), load_edits(run), fps)
+                return {"stats": p, "clips": player_clips(final, player, fps, Config().events)}
         raise HTTPException(404, f"unknown player {player}")
 
     @app.get("/api/events")

@@ -179,3 +179,21 @@ def test_evaluate_against_hand_kept_box_score(tmp_path):
     assert rep["stats"]["pts"]["team_error"] == {"home": 0, "away": -3}
     assert rep["stats"]["reb"]["exact_pct"] == round(1 / 3, 3)
     assert rep["stats"]["pf"]["mae_per_player"] == round(1 / 3, 2)
+
+
+def test_player_clips_follow_review_edits(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from hoopvision.api import create_app
+
+    tracks, ball, ids, calib = _synthetic(tmp_path)
+    meta = VideoMeta(**json.loads((tmp_path / "video.json").read_text()))
+    stage_events(tmp_path, Config(), calib, meta)
+    stage_boxscore(tmp_path, meta, roster=None)
+    block = next(Event(**e) for e in load_json(tmp_path / "events.json") if e["kind"] == "block")
+    client = TestClient(create_app(tmp_path))
+    client.post(f"/api/events/{block.event_id}/edit",
+                json={"op": "modify", "changes": {"player": "home:11"}})
+    kinds = lambda p: [c["kind"] for c in client.get(f"/api/players/{p}").json()["clips"]]  # noqa: E731
+    assert kinds(block.player).count("block") == 0
+    assert "block" in kinds("home:11")

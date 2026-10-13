@@ -75,6 +75,24 @@ def main(argv: list[str] | None = None) -> int:
     ev.add_argument("run_dir")
     ev.add_argument("truth", help="CSV: team,jersey,pts,fgm,fga,...,pf")
 
+    bm = sub.add_parser(
+        "benchmark", help="analyze a real game and score it against a hand-kept box score"
+    )
+    bm.add_argument("video")
+    bm.add_argument("truth", help="CSV: team,jersey,pts,fgm,fga,...,pf (see ML.md)")
+    bm.add_argument("--out", default="runs/benchmark")
+    bm.add_argument("--calibration", help="landmark calibration; auto-detect rims if omitted")
+    bm.add_argument("--rim-model", default="basketball_rim_best.pt")
+    bm.add_argument("--ball-model", help="ball detector (e.g. the rim model, class 0)")
+    bm.add_argument("--ball-class", type=int, default=0)
+    bm.add_argument("--device", default="cuda:0")
+    bm.add_argument("--court-length", type=float, default=84.0)
+    bm.add_argument("--frame-stride", type=int, default=1)
+    bm.add_argument("--max-frames", type=int)
+    bm.add_argument("--no-pose", dest="pose", action="store_false")
+    bm.add_argument("--no-audio", dest="audio", action="store_false")
+    bm.add_argument("--event-model")
+
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -84,7 +102,75 @@ def main(argv: list[str] | None = None) -> int:
         return _analyze(args)
     if args.cmd == "serve":
         return _serve(args)
+    if args.cmd == "benchmark":
+        return _benchmark(args)
     return _ml(args)
+
+
+def _benchmark(args: argparse.Namespace) -> int:
+    """One command for the GPU server: calibrate, run every stage, time it, score it."""
+    import json
+    import time
+
+    from .autorim import AutoRimConfig, detect_rims
+    from .court import Calibration
+    from .ml.evaluate import evaluate, load_truth
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    meta = probe(args.video)
+    if args.calibration:
+        calib = Calibration.load(args.calibration)
+    else:
+        calib = detect_rims(args.video, AutoRimConfig(model=args.rim_model, device=args.device),
+                            court_length_ft=args.court_length)
+        if calib is None:
+            raise SystemExit("no stable rim found; run `hoopvision calibrate` and pass it")
+    calib_path = out / "calibration.json"
+    calib.save(calib_path)
+
+    cfg = Config()
+    cfg.detection.device = args.device
+    cfg.detection.half = args.device != "cpu"
+    if args.ball_model:
+        cfg.detection.ball_model = args.ball_model
+        cfg.detection.ball_class = args.ball_class
+    cfg.frame_stride = args.frame_stride
+    if args.frame_stride > 1:
+        cfg.events.made_descent_frames = max(2, cfg.events.made_descent_frames // args.frame_stride)
+        cfg.events.possession_min_frames = max(
+            2, cfg.events.possession_min_frames // args.frame_stride
+        )
+    cfg.pose.enabled = args.pose
+    cfg.audio.enabled = args.audio
+    cfg.event_model = args.event_model
+
+    t0 = time.time()
+    box = run(args.video, out, calibration=calib_path, config=cfg, max_frames=args.max_frames)
+    elapsed = time.time() - t0
+    frames = min(meta.frame_count, args.max_frames or meta.frame_count)
+    report = {
+        "video": str(args.video),
+        "frames": frames,
+        "video_s": round(frames / meta.fps, 1),
+        "runtime_s": round(elapsed, 1),
+        "ms_per_frame": round(1000 * elapsed / max(frames, 1), 1),
+        "distance_reliable": calib.distance_reliable,
+        "pose": args.pose, "audio": args.audio, "event_model": args.event_model,
+        "review": box.get("review"),
+        "teams": box.get("teams"),
+        "accuracy": evaluate(box, load_truth(args.truth)),
+    }
+    (out / "accuracy.json").write_text(json.dumps(report, indent=2, default=str))
+    acc = report["accuracy"]
+    print(f"\n{frames} frames in {elapsed / 60:.1f} min ({report['ms_per_frame']} ms/frame); "
+          f"players matched {acc['players_matched']}/{acc['players_in_truth']}")
+    print(f"{'stat':6}{'MAE/player':>12}{'exact %':>10}  team error")
+    for stat, r in acc["stats"].items():
+        exact = "-" if r["exact_pct"] is None else f"{100 * r['exact_pct']:.0f}%"
+        print(f"{stat:6}{r['mae_per_player']!s:>12}{exact:>10}  {r['team_error']}")
+    print(f"\nfull report: {out / 'accuracy.json'}")
+    return 0
 
 
 def _ml(args: argparse.Namespace) -> int:

@@ -86,3 +86,22 @@ that never go into training, and run `evaluate` on them after every model change
 - The event model needs reviewed games before it helps; with few examples keep it off.
 - Accuracy targets have to be measured with `evaluate` on your footage; none of the
   numbers here are benchmarks.
+
+## Real-game benchmark (do this before merging to main)
+
+On the GPU server, with a phone-filmed game and its hand-kept box score
+(`hoopvision/truth_template.csv` shows the columns; missing columns are skipped):
+
+```bash
+hoopvision benchmark game.mp4 truth.csv --out runs/game1 \
+  --rim-model /opt/pbsports/basketball_rim_best.pt \
+  --ball-model /opt/pbsports/basketball_rim_best.pt --ball-class 0 \
+  --device cuda:0 --court-length 84
+```
+
+It auto-detects the rims (or takes `--calibration` from `hoopvision calibrate`, which is
+needed for reliable 2s vs 3s), runs every stage, times it, and writes
+`runs/game1/accuracy.json` plus a per-stat table (MAE per player, exact %, team error).
+The same run directory then opens in `hoopvision serve runs/game1` for review; re-run
+`hoopvision evaluate runs/game1/boxscore.json truth.csv` after reviewing to measure the
+verified tier.
