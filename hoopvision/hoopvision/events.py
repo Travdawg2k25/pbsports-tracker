@@ -220,9 +220,8 @@ def _through_rim(window: list[_RefFrame], rim, cfg: EventConfig) -> tuple[bool, 
         x_cross = x0 + (x1 - x0) * (plane - y0) / (y1 - y0)
         if not (rx1 - tol <= x_cross <= rx2 + tol):
             continue
-        descent = sum(
-            1 for a, b in zip(window[: k + 1], window[1 : k + 2], strict=False) if b.point[1] > a.point[1]
-        )
+        path = window[: k + 2]
+        descent = sum(1 for a, b in zip(path, path[1:], strict=False) if b.point[1] > a.point[1])
         first = window[k + 1].frame
         after = [f for f in window[k + 1 :] if f.frame - first <= cfg.made_follow_frames]
         bounced = False
