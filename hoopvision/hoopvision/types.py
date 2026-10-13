@@ -65,6 +65,7 @@ class Event:
     value: int = 0  # points for shots
     confidence: float = 0.0
     detail: dict[str, Any] = field(default_factory=dict)
+    event_id: str = ""
 
 
 @dataclass

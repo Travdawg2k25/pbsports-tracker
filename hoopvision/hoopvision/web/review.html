@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>hoopvision — review</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+  header { padding: 12px 20px; background: #111827; display: flex; gap: 16px; align-items: center; }
+  header a { color: #38bdf8; }
+  main { display: grid; grid-template-columns: 1fr 460px; gap: 16px; padding: 16px; }
+  video { width: 100%; background: #000; border-radius: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid #1e293b; text-align: left; }
+  tr.sel { background: #1e3a8a; }
+  tr:hover { background: #1e293b; cursor: pointer; }
+  button, select { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; }
+  button.ok { border-color: #22c55e; } button.del { border-color: #ef4444; }
+  .conf { font-variant-numeric: tabular-nums; }
+  #status { font-size: 14px; color: #94a3b8; }
+  #panel { background: #111827; padding: 12px; border-radius: 6px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <strong>Review</strong>
+  <span id="status">loading…</span>
+  <a href="/">box score</a>
+</header>
+<main>
+  <section>
+    <video id="vid" src="/video" controls muted></video>
+    <div id="panel">Select an event to review it.</div>
+  </section>
+  <section>
+    <table>
+      <thead><tr><th>time</th><th>stat</th><th>player</th><th>conf</th></tr></thead>
+      <tbody id="queue"></tbody>
+    </table>
+  </section>
+</main>
+<script>
+const KINDS = ["shot_made","shot_missed","free_throw_made","free_throw_missed","rebound",
+               "assist","steal","turnover","block","foul"];
+let state = {queue: [], players: []}, current = null;
+
+async function load() {
+  state = await (await fetch("/api/review")).json();
+  const box = await (await fetch("/api/boxscore")).json();
+  const r = box.review || {};
+  document.getElementById("status").textContent =
+    `${state.queue.length} to review · ${r.edits || 0} edits · ${r.status || ""}`;
+  const tb = document.getElementById("queue");
+  tb.innerHTML = "";
+  for (const e of state.queue) {
+    const tr = document.createElement("tr");
+    tr.dataset.id = e.event_id;
+    tr.innerHTML = `<td>${e.time_s.toFixed(1)}s</td><td>${e.kind}</td>` +
+      `<td>${e.player || "?"}</td><td class="conf">${e.confidence.toFixed(2)}</td>`;
+    tr.onclick = () => select(e);
+    tb.appendChild(tr);
+  }
+  if (current && !state.queue.find(e => e.event_id === current.event_id)) current = null;
+  if (!current) document.getElementById("panel").textContent =
+    state.queue.length ? "Select an event to review it." : "Everything is reviewed.";
+}
+
+function options(list, sel) {
+  return list.map(v => `<option ${v === sel ? "selected" : ""}>${v}</option>`).join("");
+}
+
+function select(e) {
+  current = e;
+  document.querySelectorAll("#queue tr").forEach(tr =>
+    tr.classList.toggle("sel", tr.dataset.id === e.event_id));
+  const v = document.getElementById("vid");
+  v.currentTime = Math.max(0, e.time_s - 3);
+  v.play();
+  const cands = (e.detail.candidates || []).map(c => c.player);
+  const players = [...new Set([...cands, ...state.players])];
+  document.getElementById("panel").innerHTML = `
+    <p><b>${e.kind}</b> at ${e.time_s.toFixed(1)}s · AI confidence ${e.confidence.toFixed(2)}</p>
+    ${cands.length ? `<p>Candidates: ${cands.join(", ")}</p>` : ""}
+    <p>Stat <select id="kind">${options(KINDS, e.kind)}</select>
+       Player <select id="player">${options(players, e.player)}</select></p>
+    <p><button class="ok" id="confirm">Confirm</button>
+       <button id="save">Save change</button>
+       <button class="del" id="delete">Not a ${e.kind}</button></p>`;
+  document.getElementById("confirm").onclick = () => edit("confirm", {});
+  document.getElementById("delete").onclick = () => edit("delete", {});
+  document.getElementById("save").onclick = () => edit("modify", {
+    kind: document.getElementById("kind").value,
+    player: document.getElementById("player").value,
+  });
+}
+
+async function edit(op, changes) {
+  const res = await fetch(`/api/events/${encodeURIComponent(current.event_id)}/edit`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({op, changes}),
+  });
+  if (!res.ok) { alert(await res.text()); return; }
+  current = null;
+  await load();
+  const next = state.queue[0];
+  if (next) select(next);
+}
+
+load();
+</script>
+</body>
+</html>

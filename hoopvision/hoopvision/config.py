@@ -102,6 +102,43 @@ class EventConfig:
     block_window_s: float = 1.0
     clip_pre_s: float = 4.0
     clip_post_s: float = 3.0
+    # Fouls: a whistle during live play. The fouler is ranked among the opponents nearest
+    # the ball handler at the whistle; free throws soon after mark it a shooting foul.
+    foul_lookback_s: float = 2.0
+    foul_ft_window_s: float = 25.0
+    foul_candidates: int = 3
+    foul_max_gap_ft: float = 8.0
+    # Pose: a keypoint frame within this many frames of an event is used for it.
+    pose_max_gap: int = 6
+    # Events below this confidence (and every foul/block/assist/steal/turnover) are queued
+    # for human review.
+    review_threshold: float = 0.6
+
+
+@dataclass
+class PoseConfig:
+    enabled: bool = True
+    model: str = "yolov8s-pose.pt"
+    imgsz: int = 1280
+    conf: float = 0.25
+    # Run pose every Nth frame, and only within window_s of a candidate event.
+    stride: int = 2
+    window_s: float = 1.5
+    match_iou: float = 0.3
+
+
+@dataclass
+class AudioConfig:
+    enabled: bool = True
+    sample_rate: int = 16000
+    window_s: float = 0.05
+    band_low_hz: float = 2000.0
+    band_high_hz: float = 4500.0
+    band_ratio: float = 0.55
+    tonality: float = 0.35
+    tonal_bins: int = 6
+    min_db: float = -45.0
+    min_duration_s: float = 0.15
 
 
 @dataclass
@@ -110,6 +147,10 @@ class Config:
     track: TrackConfig = field(default_factory=TrackConfig)
     jersey: JerseyConfig = field(default_factory=JerseyConfig)
     events: EventConfig = field(default_factory=EventConfig)
+    pose: PoseConfig = field(default_factory=PoseConfig)
+    audio: AudioConfig = field(default_factory=AudioConfig)
+    # Optional learned event re-scorer (hoopvision train-events); rules only when unset.
+    event_model: str | None = None
     # Process every Nth frame for DETECTION. Keep at 1: striding fragments the tracker
     # (measured 85->147 tracks at stride 2), so it is not a usable throughput lever.
     frame_stride: int = 1
@@ -130,7 +171,11 @@ class Config:
             track=TrackConfig(**raw.get("track", {})),
             jersey=JerseyConfig(**raw.get("jersey", {})),
             events=EventConfig(**raw.get("events", {})),
+            pose=PoseConfig(**raw.get("pose", {})),
+            audio=AudioConfig(**raw.get("audio", {})),
+            event_model=raw.get("event_model"),
             frame_stride=raw.get("frame_stride", 1),
+            motion_stride=raw.get("motion_stride", 5),
         )
 
     def save(self, path: str | Path) -> None:

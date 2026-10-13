@@ -47,6 +47,34 @@ def main(argv: list[str] | None = None) -> int:
     srv.add_argument("--port", type=int, default=8000)
     srv.add_argument("--host", default="127.0.0.1")
 
+    ds = sub.add_parser("build-dataset", help="training examples from reviewed runs")
+    ds.add_argument("runs", nargs="+", help="run directories with edits.json")
+    ds.add_argument("--out", default="models/events.npz")
+
+    te = sub.add_parser("train-events", help="train the temporal event model (GPU server)")
+    te.add_argument("dataset", help="npz from build-dataset")
+    te.add_argument("--out", default="models/events.pt")
+    te.add_argument("--epochs", type=int, default=40)
+    te.add_argument("--device", default="cpu")
+
+    td = sub.add_parser("train-detector", help="fine-tune a YOLO ball/rim/player/pose model")
+    td.add_argument("data", help="YOLO data.yaml, e.g. a Roboflow export")
+    td.add_argument("--model", default="yolov8s.pt")
+    td.add_argument("--epochs", type=int, default=100)
+    td.add_argument("--imgsz", type=int, default=1280)
+    td.add_argument("--batch", type=int, default=16)
+    td.add_argument("--device", default="0")
+    td.add_argument("--name", default="detector")
+
+    fr = sub.add_parser("export-frames", help="dump frames from a game for labelling")
+    fr.add_argument("video")
+    fr.add_argument("--out", default="frames")
+    fr.add_argument("--every", type=float, default=2.0, help="seconds between frames")
+
+    ev = sub.add_parser("evaluate", help="compare a run's box score to a hand-kept one")
+    ev.add_argument("run_dir")
+    ev.add_argument("truth", help="CSV: team,jersey,pts,fgm,fga,...,pf")
+
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -54,7 +82,40 @@ def main(argv: list[str] | None = None) -> int:
         return _calibrate(args)
     if args.cmd == "analyze":
         return _analyze(args)
-    return _serve(args)
+    if args.cmd == "serve":
+        return _serve(args)
+    return _ml(args)
+
+
+def _ml(args: argparse.Namespace) -> int:
+    import json
+
+    if args.cmd == "build-dataset":
+        from .ml.dataset import build_dataset
+
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        result = build_dataset([Path(r) for r in args.runs], Path(args.out))
+    elif args.cmd == "train-events":
+        from .ml.event_model import train
+
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        result = train(Path(args.dataset), Path(args.out), args.epochs, device=args.device)
+    elif args.cmd == "train-detector":
+        from .ml.train_detector import train_detector
+
+        result = train_detector(args.data, args.model, args.epochs, args.imgsz, args.batch,
+                                args.device, name=args.name)
+    elif args.cmd == "export-frames":
+        from .ml.train_detector import export_frames
+
+        result = {"frames": export_frames(args.video, args.out, args.every)}
+    else:
+        from .ml.evaluate import evaluate, load_truth
+
+        box = json.loads((Path(args.run_dir) / "boxscore.json").read_text())
+        result = evaluate(box, load_truth(args.truth))
+    print(json.dumps(result, indent=2))
+    return 0
 
 
 def _calibrate(args: argparse.Namespace) -> int:
