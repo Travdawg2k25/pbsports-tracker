@@ -23,12 +23,27 @@ from .court import (
     Calibration,
     landmarks_ft,
 )
-from .types import Event, load_json
+from .pipeline import stage_boxscore
+from .review import apply_edits, load_edits, record_edit, review_queue
+from .types import Event, VideoMeta, load_json
 
 WEB = Path(__file__).parent / "web"
 
 
-def create_app(run_dir: str | Path, video: str | Path | None = None) -> FastAPI:
+class EditPayload(BaseModel):
+    op: str
+    changes: dict[str, Any] = {}
+    reviewer: str | None = None
+
+
+class AddPayload(BaseModel):
+    event: dict[str, Any]
+    reviewer: str | None = None
+
+
+def create_app(
+    run_dir: str | Path, video: str | Path | None = None, review_threshold: float = 0.6
+) -> FastAPI:
     run = Path(run_dir)
     app = FastAPI(title="hoopvision", version="0.1.0")
 
@@ -73,7 +88,8 @@ def create_app(run_dir: str | Path, video: str | Path | None = None) -> FastAPI:
         for p in box["players"]:
             if p["player"] == player:
                 fps = box["video"]["fps"]
-                return {"stats": p, "clips": player_clips(events(), player, fps, Config().events)}
+                final = apply_edits(events(), load_edits(run), fps)
+                return {"stats": p, "clips": player_clips(final, player, fps, Config().events)}
         raise HTTPException(404, f"unknown player {player}")
 
     @app.get("/api/events")
@@ -84,6 +100,43 @@ def create_app(run_dir: str | Path, video: str | Path | None = None) -> FastAPI:
         if player:
             out = [e for e in out if e["player"] == player]
         return out
+
+    def recompute() -> dict[str, Any]:
+        meta = VideoMeta(**load_json(run / "video.json"))
+        return stage_boxscore(run, meta, roster=None, review_threshold=review_threshold)
+
+    @app.get("/review", response_class=HTMLResponse)
+    def review_page() -> str:
+        return (WEB / "review.html").read_text()
+
+    @app.get("/api/review")
+    def api_review() -> dict[str, Any]:
+        fps = load_json(run / "video.json")["fps"]
+        final = apply_edits(events(), load_edits(run), fps)
+        return {
+            "queue": review_queue(final, review_threshold),
+            "edits": load_edits(run),
+            "players": [p["player"] for p in boxscore()["players"]],
+        }
+
+    @app.post("/api/events/{event_id}/edit")
+    def api_edit(event_id: str, body: EditPayload) -> dict[str, Any]:
+        try:
+            record_edit(
+                run, {"op": body.op, "event_id": event_id, "changes": body.changes},
+                body.reviewer,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return recompute()
+
+    @app.post("/api/events")
+    def api_add(body: AddPayload) -> dict[str, Any]:
+        try:
+            record_edit(run, {"op": "add", "event": body.event}, body.reviewer)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return recompute()
 
     @app.get("/video")
     def api_video() -> FileResponse:

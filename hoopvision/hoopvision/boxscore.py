@@ -34,6 +34,7 @@ class PlayerLine:
     steals: int = 0
     blocks: int = 0
     turnovers: int = 0
+    fouls: int = 0
     possessions: int = 0
     seconds_with_ball: float = 0.0
     event_indices: list[int] = field(default_factory=list)
@@ -49,6 +50,12 @@ class PlayerLine:
     @property
     def ft_pct(self) -> float | None:
         return round(self.ftm / self.fta, 3) if self.fta else None
+
+
+TEAM_STATS = (
+    "points", "fgm", "fga", "tpm", "tpa", "ftm", "fta", "rebounds", "offensive_rebounds",
+    "defensive_rebounds", "assists", "steals", "blocks", "turnovers", "fouls",
+)
 
 
 def aggregate(events: list[Event], fps: float, roster: dict[str, str] | None = None) -> dict:
@@ -102,6 +109,8 @@ def aggregate(events: list[Event], fps: float, roster: dict[str, str] | None = N
             pl.steals += 1
         elif ev.kind == "turnover":
             pl.turnovers += 1
+        elif ev.kind == "foul":
+            pl.fouls += 1
         elif ev.kind == "possession":
             pl.possessions += 1
             end = ev.detail.get("end_frame", ev.frame)
@@ -116,16 +125,15 @@ def aggregate(events: list[Event], fps: float, roster: dict[str, str] | None = N
         d["seconds_with_ball"] = round(pl.seconds_with_ball, 1)
         players.append(d)
 
-    teams: dict[str, dict[str, int]] = {}
+    teams: dict[str, dict[str, Any]] = {}
     for pl in lines.values():
-        t = pl.team or "unknown"
-        agg = teams.setdefault(t, {"points": 0, "fgm": 0, "fga": 0, "rebounds": 0, "assists": 0})
-        agg["points"] += pl.points
-        agg["fgm"] += pl.fgm
-        agg["fga"] += pl.fga
-        agg["rebounds"] += pl.rebounds
-        agg["assists"] += pl.assists
-
+        agg = teams.setdefault(pl.team or "unknown", {k: 0 for k in TEAM_STATS})
+        for k in TEAM_STATS:
+            agg[k] += getattr(pl, k)
+    for agg in teams.values():
+        agg["fg_pct"] = round(agg["fgm"] / agg["fga"], 3) if agg["fga"] else None
+        agg["tp_pct"] = round(agg["tpm"] / agg["tpa"], 3) if agg["tpa"] else None
+        agg["ft_pct"] = round(agg["ftm"] / agg["fta"], 3) if agg["fta"] else None
     return {"players": players, "teams": teams}
 
 

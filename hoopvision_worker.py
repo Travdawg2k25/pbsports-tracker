@@ -100,6 +100,11 @@ MOTION_STRIDE = int(os.environ.get("HV_MOTION_STRIDE", "5"))
 # against ground truth. Off by default because a full-frame OCR pass costs time and only
 # helps when the scoreboard is legible; enable per-camera once a scoreboard region is
 # markable. HV_SCOREBOARD=1 to turn on.
+# Pose keypoints (shot form, contests) and referee-whistle fouls; event model optional.
+POSE_ENABLED = os.environ.get("HV_POSE", "1") == "1"
+POSE_MODEL = os.environ.get("HV_POSE_MODEL", "yolov8s-pose.pt")
+AUDIO_ENABLED = os.environ.get("HV_AUDIO", "1") == "1"
+EVENT_MODEL = os.environ.get("HV_EVENT_MODEL") or None
 SCOREBOARD_ENABLED = os.environ.get("HV_SCOREBOARD", "0") == "1"
 SCOREBOARD_SAMPLE_S = float(os.environ.get("HV_SCOREBOARD_SAMPLE_S", "5.0"))
 def _resolve_ffmpeg() -> str | None:
@@ -357,6 +362,10 @@ def do_analyze(job):
             cfg.detection.ball_model = BALL_MODEL
             cfg.detection.ball_class = BALL_CLASS
         cfg.detection.ball_tiled = BALL_TILED
+        cfg.pose.enabled = POSE_ENABLED
+        cfg.pose.model = POSE_MODEL
+        cfg.audio.enabled = AUDIO_ENABLED
+        cfg.event_model = EVENT_MODEL
         post_status(job_id, progress=15)
         boxscore = hv_run(
             video=str(vpath),
@@ -402,6 +411,15 @@ def do_analyze(job):
         stats_path.write_text(json.dumps(stats, default=str, indent=2))
         stats_key = f"results/{job_id}/stats.json"
         s3_upload(stats_path, stats_key, "application/json")
+        # Whole-game artifacts for the review screen and the training loop: every event
+        # for both teams, the full box score, and the inputs the event model learns from.
+        for name in ("events.json", "boxscore.json", "tracks.json", "ball.json",
+                     "identities.json", "pose.json", "whistles.json", "motion.json",
+                     "video.json"):
+            artifact = td / "run" / name
+            if artifact.exists():
+                s3_upload(artifact, f"results/{job_id}/run/{name}", "application/json")
+        s3_upload(calib_path, f"results/{job_id}/run/calibration.json", "application/json")
 
         # 4. Cut an H.264 highlight reel for the focus player from its event windows.
         reel_keys = {}

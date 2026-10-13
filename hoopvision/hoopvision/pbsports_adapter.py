@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Any
 
 # Stats HoopVision still cannot observe from a single camera. Present as 0, not fabricated.
-_UNSUPPORTED = ("passes", "fouls")
+_UNSUPPORTED = ("passes",)
 
 
 def _pct(makes: int, attempts: int) -> float | None:
@@ -94,6 +94,8 @@ def _player_line_to_pbsports(
         "blocks": line.get("blocks", 0),
         # Defense / streaks / efficiency HoopVision does not measure — reported as 0/None
         "steals": line.get("steals", 0),
+        # Personal fouls come from whistle detection; always reviewer-confirmed.
+        "fouls": line.get("fouls", 0),
         "consecutive_makes": 0,
         "is_hot": False,
         "per_rating": None,

@@ -12,11 +12,14 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
+from .audio import load_whistles, stage_audio
 from .boxscore import aggregate, load_roster
 from .config import Config
 from .court import Calibration
 from .events import build_events
 from .jersey import JerseyReader, resolve_identity
+from .pose import estimate_poses, frames_near, load_poses, save_poses
+from .review import apply_edits, ensure_ids, load_edits, review_queue
 from .stabilize import Motion, displacement, estimate_motion
 from .teams import assign_teams, separation, track_colour
 from .types import (
@@ -32,7 +35,7 @@ from .video import FrameSeeker, iter_frames, probe
 
 log = logging.getLogger("hoopvision")
 
-STAGES = ["motion", "track", "teams", "jersey", "events", "boxscore"]
+STAGES = ["motion", "track", "teams", "jersey", "pose", "audio", "events", "boxscore"]
 
 # Below this the camera is static enough that warping every frame is noise, not signal.
 STATIC_CAMERA_PX = 8.0
@@ -70,9 +73,13 @@ def run(
         _timed("teams", lambda: stage_teams(video, out, cfg))
     if begin <= 3:
         _timed("jersey", lambda: stage_jersey(video, out, cfg))
-    if begin <= 4:
+    if begin <= 4 and cfg.pose.enabled and calib is not None:
+        _timed("pose", lambda: stage_pose(video, out, cfg, calib, meta))
+    if begin <= 5 and cfg.audio.enabled:
+        _timed("audio", lambda: stage_audio(video, out, cfg.audio))
+    if begin <= 6:
         _timed("events", lambda: stage_events(out, cfg, calib, meta))
-    return stage_boxscore(out, meta, roster)
+    return stage_boxscore(out, meta, roster, cfg.events.review_threshold)
 
 
 def stage_motion(
@@ -169,25 +176,67 @@ def stage_jersey(video: str | Path, out: Path, cfg: Config) -> None:
     log.info("jersey OCR: %d/%d tracks identified", named, len(identities))
 
 
-def stage_events(out: Path, cfg: Config, calib: Calibration | None, meta: VideoMeta) -> None:
-    if calib is None:
-        raise ValueError("event detection needs a calibration file (hoopvision calibrate)")
+def _event_inputs(out: Path):
     tracks = tracks_from_json(load_json(out / "tracks.json"))
-    ball_raw = load_json(out / "ball.json")
-    ball = tracks_from_json([ball_raw])[0]
+    ball = tracks_from_json([load_json(out / "ball.json")])[0]
     identities = {
         i["track_id"]: (i["team"], i["jersey"]) for i in load_json(out / "identities.json")
     }
-    events = build_events(tracks, ball, calib, identities, meta.fps, cfg.events)
+    return tracks, ball, identities
+
+
+def stage_pose(
+    video: str | Path, out: Path, cfg: Config, calib: Calibration, meta: VideoMeta
+) -> None:
+    """Keypoints for the players involved in candidate events (shots, blocks, changes)."""
+    tracks, ball, identities = _event_inputs(out)
+    rough = build_events(tracks, ball, calib, identities, meta.fps, cfg.events)
+    centres = [e.frame for e in rough if e.kind != "possession"]
+    involved = {e.track_id for e in rough if e.track_id is not None}
+    for e in rough:
+        involved.update(c["track_id"] for c in e.detail.get("candidates", []))
+    wanted = frames_near(centres, int(cfg.pose.window_s * meta.fps), cfg.pose.stride)
+    poses = estimate_poses(
+        video, [t for t in tracks if t.track_id in involved] or tracks, cfg.pose,
+        device=getattr(cfg, "device", "cpu"), frames_of_interest=wanted,
+    )
+    save_poses(poses, out / "pose.json")
+    log.info("pose: %d tracks with keypoints over %d frames", len(poses), len(wanted))
+
+
+def stage_events(out: Path, cfg: Config, calib: Calibration | None, meta: VideoMeta) -> None:
+    if calib is None:
+        raise ValueError("event detection needs a calibration file (hoopvision calibrate)")
+    tracks, ball, identities = _event_inputs(out)
+    poses = load_poses(out / "pose.json")
+    whistles = load_whistles(out / "whistles.json")
+    events = build_events(
+        tracks, ball, calib, identities, meta.fps, cfg.events, whistles=whistles, poses=poses
+    )
+    if cfg.event_model and Path(cfg.event_model).exists():
+        from .ml.event_model import EventRescorer
+
+        rescorer = EventRescorer(cfg.event_model, device=getattr(cfg, "device", "cpu"))
+        events = rescorer.rescore(events, ball, tracks, identities, calib, meta.fps, poses)
     dump_json(events, out / "events.json")
-    log.info("events: %d", len(events))
+    log.info("events: %d (%d whistles, %d posed tracks)", len(events), len(whistles), len(poses))
 
 
-def stage_boxscore(out: Path, meta: VideoMeta, roster: str | Path | None) -> dict:
-    raw = load_json(out / "events.json")
-    events = [Event(**e) for e in raw]
+def stage_boxscore(
+    out: Path, meta: VideoMeta, roster: str | Path | None, review_threshold: float = 0.6
+) -> dict:
+    """Box score from the AI events with every reviewer edit applied on top."""
+    ai_events = ensure_ids([Event(**e) for e in load_json(out / "events.json")])
+    edits = load_edits(out)
+    events = apply_edits(ai_events, edits, meta.fps)
     box = aggregate(events, meta.fps, load_roster(roster))
     box["video"] = asdict(meta) | {"duration_s": meta.duration_s}
+    queue = review_queue(events, review_threshold)
+    box["review"] = {
+        "edits": len(edits),
+        "pending": len(queue),
+        "status": "verified" if not queue else ("in_review" if edits else "ai_draft"),
+    }
     dump_json(box, out / "boxscore.json")
     return box
 

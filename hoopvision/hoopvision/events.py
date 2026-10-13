@@ -22,8 +22,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .audio import Whistle
 from .config import EventConfig
-from .court import Calibration, shot_value
+from .court import LANE_WIDTH_FT, Calibration, shot_value
+from .pose import PoseTrack, contest_score, shooting_score
+from .review import ensure_ids
 from .types import Event, Track
 
 
@@ -168,7 +171,9 @@ def rim_events(ball: Track, calib: Calibration, cfg: EventConfig) -> list[RimEve
         # region is generous above the rim (the incoming arc) but tight to the sides
         # and only just below it — otherwise a ball dribbled in the backcourt drifts
         # into an oversized neighbourhood and every pass is mistaken for a shot.
-        near_x1, near_x2 = rx1 - 0.5 * width, rx2 + 0.5 * width
+        # One rim-width either side still catches a shot that clanks off the front or
+        # back iron, which a half-width margin missed entirely (no misses were counted).
+        near_x1, near_x2 = rx1 - 1.0 * width, rx2 + 1.0 * width
         near_y1, near_y2 = ry1 - 3 * height, ry2 + 1.5 * height
         i = 0
         while i < len(frames):
@@ -191,33 +196,71 @@ class _RefFrame:
 
 
 def _through_rim(window: list[_RefFrame], rim, cfg: EventConfig) -> tuple[bool, float]:
-    """A make: the ball is above the rim, then below it, inside the cylinder, descending."""
+    """A make: the ball comes down through the rim opening and stays under it.
+
+    Phone video at 30 fps moves a dropping ball further per frame than a rim is tall,
+    and the detector often loses the ball in the net, so requiring a detection *inside*
+    the thin rim box misses almost every make. Instead, find the frame pair whose
+    straight line crosses the rim plane going down, interpolate where it crossed, and
+    then check the ball did not bounce back out (up, or sideways off the iron).
+    """
     rx1, ry1, rx2, ry2 = rim
-    above = below = False
-    descent = 0
-    prev_y = None
-    inside_when_crossing = False
-    for tf in window:
-        cx, cy = tf.point
-        inside_x = rx1 <= cx <= rx2
-        if prev_y is not None and cy > prev_y:
-            descent += 1
-        if cy < ry1 and inside_x:
+    width = max(rx2 - rx1, 1.0)
+    height = max(ry2 - ry1, 1.0)
+    plane = (ry1 + ry2) / 2
+    tol = cfg.made_x_tol * width
+    above = False
+    for k in range(len(window) - 1):
+        (x0, y0), (x1, y1) = window[k].point, window[k + 1].point
+        if y0 < ry1 and rx1 - width <= x0 <= rx2 + width:
             above = True
-        if above and ry1 <= cy <= ry2 and inside_x:
-            inside_when_crossing = True
-        if above and cy > ry2 and inside_x:
-            below = True
-            break
-        prev_y = cy
-    made = above and below and inside_when_crossing and descent >= cfg.made_descent_frames
-    if made:
-        return True, 0.8
+        gap = window[k + 1].frame - window[k].frame
+        if not above or not (y0 < plane <= y1) or gap > cfg.made_max_gap_frames:
+            continue
+        x_cross = x0 + (x1 - x0) * (plane - y0) / (y1 - y0)
+        if not (rx1 - tol <= x_cross <= rx2 + tol):
+            continue
+        path = window[: k + 2]
+        descent = sum(1 for a, b in zip(path, path[1:], strict=False) if b.point[1] > a.point[1])
+        first = window[k + 1].frame
+        after = [f for f in window[k + 1 :] if f.frame - first <= cfg.made_follow_frames]
+        bounced = False
+        for fx, fy in (f.point for f in after):
+            off = max(rx1 - fx, fx - rx2, 0.0)
+            if off > 3 * width:
+                continue  # the ball was picked up elsewhere / a detection jump
+            if fy < ry1 - 0.5 * height or (fy < ry2 + 2 * height and off > 0.5 * width):
+                bounced = True
+                break
+        if bounced or descent < min(cfg.made_descent_frames, k + 1):
+            continue
+        centred = 1 - min(abs(x_cross - (rx1 + rx2) / 2) / (width / 2 + tol), 1)
+        return True, round(0.65 + 0.25 * centred, 3)
     # The ball reached the rim area but did not pass cleanly through it.
     return False, 0.6 if above else 0.4
 
 
 def build_events(
+    player_tracks: list[Track],
+    ball: Track,
+    calib: Calibration,
+    identities: dict[int, tuple[str | None, str | None]],
+    fps: float,
+    cfg: EventConfig,
+    whistles: list[Whistle] | None = None,
+    poses: dict[int, PoseTrack] | None = None,
+) -> list[Event]:
+    events = _rule_events(player_tracks, ball, calib, identities, fps, cfg)
+    if poses:
+        _apply_pose(events, poses, cfg)
+    if whistles:
+        events.extend(
+            _fouls(whistles, events, player_tracks, ball, calib, identities, fps, cfg)
+        )
+    return ensure_ids(sorted(events, key=lambda e: e.frame))
+
+
+def _rule_events(
     player_tracks: list[Track],
     ball: Track,
     calib: Calibration,
@@ -434,7 +477,10 @@ def _is_free_throw(
     inward = 1.0 if hoop == "left" else -1.0
     ft_line_x = baseline_x + inward * calib.ft_line_ft
     near_ft_line = abs(shooter.court_xy[0] - ft_line_x) <= cfg.free_throw_line_tol_ft
-    if not near_ft_line:
+    # The shooter must also be inside the FT circle (lane width), not out on the elbow
+    # extended, where a jump shot is the same distance from the baseline.
+    in_circle = abs(shooter.court_xy[1] - calib.court_width_ft / 2) <= LANE_WIDTH_FT / 2 + 1.0
+    if not (near_ft_line and in_circle):
         return False
     # Dead ball before: no rim interaction in the window preceding the shot.
     dead_window = cfg.free_throw_dead_s * fps
@@ -506,3 +552,129 @@ def _detect_block(
         confidence=0.3,
         detail={"shooter": shooter.player, "gap_ft": round(best[0], 1), "candidate": True},
     )
+
+
+def _apply_pose(events: list[Event], poses: dict[int, PoseTrack], cfg: EventConfig) -> None:
+    """Raise or lower shot and block confidence by what the players' bodies were doing.
+
+    A shooter with hands up near release confirms the shot; a "shot" from a player whose
+    hands never rose is more likely a tip or a bad ball track. Blocks need a raised arm.
+    """
+    for i, ev in enumerate(events):
+        pose = poses.get(ev.track_id) if ev.track_id is not None else None
+        if pose is None:
+            continue
+        if ev.kind in ("shot_made", "shot_missed", "free_throw_made", "free_throw_missed"):
+            # Release happens shortly before the rim interaction.
+            release = ev.frame - int(cfg.pose_max_gap * 3)
+            best = max(
+                (shooting_score(pose.nearest(f, cfg.pose_max_gap))
+                 for f in range(release - cfg.pose_max_gap * 3, ev.frame + 1, 2)),
+                default=0.0,
+            )
+            factor = 0.75 + 0.4 * best
+            events[i] = _with(ev, min(1.0, ev.confidence * factor), shooting_pose=best)
+        elif ev.kind == "block":
+            arm = contest_score(pose.nearest(ev.frame, cfg.pose_max_gap * 2))
+            events[i] = _with(ev, min(1.0, ev.confidence * (0.5 + 1.2 * arm)), contest_pose=arm)
+
+
+def _with(ev: Event, confidence: float, **detail) -> Event:
+    from dataclasses import replace
+
+    return replace(ev, confidence=round(confidence, 3), detail={**ev.detail, **detail})
+
+
+def _fouls(
+    whistles: list[Whistle],
+    events: list[Event],
+    player_tracks: list[Track],
+    ball: Track,
+    calib: Calibration,
+    identities: dict[int, tuple[str | None, str | None]],
+    fps: float,
+    cfg: EventConfig,
+) -> list[Event]:
+    """One candidate foul per whistle blown during live play.
+
+    The fouled player is whoever held (or last held) the ball just before the whistle.
+    The fouler is ranked among opponents by distance to that player at the whistle; the
+    top few go in ``detail.candidates`` so a reviewer picks with one click. A whistle
+    straight after a made basket or with no one on the ball (timeouts, subs, violations)
+    is not a foul.
+    """
+    poss = [e for e in events if e.kind == "possession"]
+    makes = [e.frame for e in events if e.kind in ("shot_made", "free_throw_made")]
+    fts = [e.frame for e in events if e.kind.startswith("free_throw")]
+    out: list[Event] = []
+    for w in whistles:
+        frame = int(w.start_s * fps)
+        if any(0 <= frame - m <= 1.5 * fps for m in makes):
+            continue
+        lookback = cfg.foul_lookback_s * fps
+        held = [
+            p for p in poss
+            if p.frame <= frame and frame - p.detail.get("end_frame", p.frame) <= lookback
+        ]
+        if not held:
+            continue
+        fouled = max(held, key=lambda p: p.detail.get("end_frame", p.frame))
+        fouled_team = identities.get(fouled.track_id, (None, None))[0]
+        anchor = _court_at(fouled.track_id, player_tracks, calib, frame, fps)
+        if anchor is None:
+            continue
+        ranked: list[tuple[float, Track]] = []
+        for t in player_tracks:
+            team = identities.get(t.track_id, (None, None))[0]
+            if t.track_id == fouled.track_id or (fouled_team and team == fouled_team):
+                continue
+            pos = _court_at(t.track_id, player_tracks, calib, frame, fps, track=t)
+            if pos is None:
+                continue
+            ranked.append((float(np.hypot(pos[0] - anchor[0], pos[1] - anchor[1])), t))
+        ranked.sort(key=lambda r: r[0])
+        cands = [
+            {"player": _key(t.track_id, identities), "track_id": t.track_id,
+             "distance_ft": round(d, 1)}
+            for d, t in ranked[: cfg.foul_candidates]
+        ]
+        shooting = any(0 < f - frame <= cfg.foul_ft_window_s * fps for f in fts)
+        top = cands[0] if cands else None
+        margin = (ranked[1][0] - ranked[0][0]) if len(ranked) > 1 else 3.0
+        conf = w.confidence * (0.35 + 0.1 * min(margin, 3.0)) * (1.15 if shooting else 1.0)
+        # No opponent within reach of the ball handler: off-ball foul or a whistle for
+        # something else. Keep the nearest as candidates, but at low confidence.
+        if not ranked or ranked[0][0] > cfg.foul_max_gap_ft:
+            conf *= 0.4
+        out.append(
+            Event(
+                kind="foul",
+                frame=frame,
+                time_s=frame / fps,
+                player=top["player"] if top else None,
+                track_id=top["track_id"] if top else None,
+                confidence=round(min(conf, 0.8), 3),
+                detail={
+                    "fouled": fouled.player,
+                    "candidates": cands,
+                    "shooting_foul": shooting,
+                    "whistle": {"start_s": w.start_s, "end_s": w.end_s},
+                },
+            )
+        )
+    return out
+
+
+def _court_at(tid, player_tracks, calib, frame, fps, track=None):
+    t = track or next((x for x in player_tracks if x.track_id == tid), None)
+    if t is None or not t.frames:
+        return None
+    near = min(t.frames, key=lambda tf: abs(tf.frame - frame))
+    if abs(near.frame - frame) > fps:
+        return None
+    return calib.foot_point(near.box, near.frame)
+
+
+def _key(tid: int, identities) -> str:
+    team, jersey = identities.get(tid, (None, None))
+    return f"{team or 'unknown'}:{jersey}" if jersey else f"{team or 'unknown'}:t{tid}"

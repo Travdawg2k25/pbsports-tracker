@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 # Ball-motion thresholds
 BALL_SPEED_THRESHOLD    = 12.0   # px/frame to consider ball moving fast
+BALL_SPEED_MAX          = 150.0  # px/frame; faster is a detection jump, not a real ball
 ARC_MIN_HEIGHT          = 40     # px — minimum rise for a valid shot arc
 RISING_FRAMES_MIN       = 4      # consecutive rising frames to confirm shot
 RIM_PROXIMITY_PX        = 60     # px — ball must be within this to score
@@ -350,8 +351,10 @@ class ShotDetector:
         speed_threshold:    float = BALL_SPEED_THRESHOLD,
         arc_min_height:     float = ARC_MIN_HEIGHT,
         rising_frames_min:  int   = RISING_FRAMES_MIN,
+        max_speed:          float = BALL_SPEED_MAX,
     ):
         self.speed_threshold   = speed_threshold
+        self.max_speed         = max_speed
         self.arc_min_height    = arc_min_height
         self.rising_frames_min = rising_frames_min
 
@@ -382,6 +385,16 @@ class ShotDetector:
         if self._prev_ball_pos is not None:
             px, py = self._prev_ball_pos
             speed  = math.hypot(bx - px, by - py)
+
+            # The detector jumped to another object (or a false positive): no real ball
+            # moves this far in one frame. Restart arc tracking from the new position
+            # instead of turning the jump into a fake shot attempt.
+            if speed > self.max_speed:
+                self._rising_frames = 0
+                self._peak_y        = float("inf")
+                self._prev_ball_pos = (bx, by)
+                self._prev_ball_y   = by
+                return None
 
             # In image coords: y decreases upward → going_up means by < prev_y
             going_up = by < self._prev_ball_y
