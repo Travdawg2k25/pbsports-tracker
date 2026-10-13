@@ -197,3 +197,36 @@ def test_player_clips_follow_review_edits(tmp_path):
     kinds = lambda p: [c["kind"] for c in client.get(f"/api/players/{p}").json()["clips"]]  # noqa: E731
     assert kinds(block.player).count("block") == 0
     assert "block" in kinds("home:11")
+
+
+def _rim_shot(points):
+    from hoopvision.court import Calibration
+    from hoopvision.events import rim_events
+    from hoopvision.types import Track, TrackFrame
+
+    calib = Calibration(rim_boxes={"right": (100.0, 200.0, 124.0, 208.0)})
+    frames = [TrackFrame(f, (x - 5, y - 5, x + 5, y + 5), 0.9) for f, x, y in points]
+    ball = Track(1, "ball", frames)
+    return rim_events(ball, calib, Config().events)
+
+
+def test_make_detected_when_ball_skips_rim_band_and_vanishes_in_net():
+    # 30 fps phone video: the ball drops ~25 px/frame past an 8 px tall rim, so no
+    # detection ever lands inside the rim box, and frames 7-8 are lost in the net.
+    pts = [(0, 60, 150), (1, 80, 168), (2, 100, 178), (3, 110, 180), (4, 112, 185),
+           (5, 112, 196), (6, 113, 221), (9, 113, 260)]
+    (rim,) = _rim_shot(pts)
+    assert rim.made and rim.confidence > 0.8
+
+
+def test_front_rim_bounce_out_is_a_miss():
+    pts = [(0, 60, 150), (1, 80, 168), (2, 100, 180), (3, 106, 196), (4, 105, 212),
+           (5, 96, 190), (6, 84, 176), (7, 70, 170)]
+    (rim,) = _rim_shot(pts)
+    assert not rim.made
+
+
+def test_ball_passing_beside_rim_is_a_miss():
+    pts = [(0, 60, 150), (1, 90, 170), (2, 130, 190), (3, 138, 215), (4, 142, 240)]
+    (rim,) = _rim_shot(pts)
+    assert not rim.made

@@ -84,6 +84,13 @@ class EventConfig:
     # Shot detection around the calibrated rim boxes.
     rim_approach_ft: float = 4.0
     made_descent_frames: int = 4
+    # Make test: where the ball's path crosses the rim plane may sit this many rim widths
+    # outside the marked box (rim boxes are hand/auto-drawn and a few px off).
+    made_x_tol: float = 0.15
+    # Two ball detections further apart than this can't be joined into a crossing.
+    made_max_gap_frames: int = 8
+    # Frames after the crossing checked for the ball bouncing back out.
+    made_follow_frames: int = 8
     three_point_radius_ft: float = 22.15
     corner_three_x_ft: float = 22.0
     # Rebound: first player to gain possession within this window after a miss.

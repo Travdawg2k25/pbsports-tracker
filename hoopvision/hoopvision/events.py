@@ -196,28 +196,47 @@ class _RefFrame:
 
 
 def _through_rim(window: list[_RefFrame], rim, cfg: EventConfig) -> tuple[bool, float]:
-    """A make: the ball is above the rim, then below it, inside the cylinder, descending."""
+    """A make: the ball comes down through the rim opening and stays under it.
+
+    Phone video at 30 fps moves a dropping ball further per frame than a rim is tall,
+    and the detector often loses the ball in the net, so requiring a detection *inside*
+    the thin rim box misses almost every make. Instead, find the frame pair whose
+    straight line crosses the rim plane going down, interpolate where it crossed, and
+    then check the ball did not bounce back out (up, or sideways off the iron).
+    """
     rx1, ry1, rx2, ry2 = rim
-    above = below = False
-    descent = 0
-    prev_y = None
-    inside_when_crossing = False
-    for tf in window:
-        cx, cy = tf.point
-        inside_x = rx1 <= cx <= rx2
-        if prev_y is not None and cy > prev_y:
-            descent += 1
-        if cy < ry1 and inside_x:
+    width = max(rx2 - rx1, 1.0)
+    height = max(ry2 - ry1, 1.0)
+    plane = (ry1 + ry2) / 2
+    tol = cfg.made_x_tol * width
+    above = False
+    for k in range(len(window) - 1):
+        (x0, y0), (x1, y1) = window[k].point, window[k + 1].point
+        if y0 < ry1 and rx1 - width <= x0 <= rx2 + width:
             above = True
-        if above and ry1 <= cy <= ry2 and inside_x:
-            inside_when_crossing = True
-        if above and cy > ry2 and inside_x:
-            below = True
-            break
-        prev_y = cy
-    made = above and below and inside_when_crossing and descent >= cfg.made_descent_frames
-    if made:
-        return True, 0.8
+        gap = window[k + 1].frame - window[k].frame
+        if not above or not (y0 < plane <= y1) or gap > cfg.made_max_gap_frames:
+            continue
+        x_cross = x0 + (x1 - x0) * (plane - y0) / (y1 - y0)
+        if not (rx1 - tol <= x_cross <= rx2 + tol):
+            continue
+        descent = sum(
+            1 for a, b in zip(window[: k + 1], window[1 : k + 2], strict=False) if b.point[1] > a.point[1]
+        )
+        first = window[k + 1].frame
+        after = [f for f in window[k + 1 :] if f.frame - first <= cfg.made_follow_frames]
+        bounced = False
+        for fx, fy in (f.point for f in after):
+            off = max(rx1 - fx, fx - rx2, 0.0)
+            if off > 3 * width:
+                continue  # the ball was picked up elsewhere / a detection jump
+            if fy < ry1 - 0.5 * height or (fy < ry2 + 2 * height and off > 0.5 * width):
+                bounced = True
+                break
+        if bounced or descent < min(cfg.made_descent_frames, k + 1):
+            continue
+        centred = 1 - min(abs(x_cross - (rx1 + rx2) / 2) / (width / 2 + tol), 1)
+        return True, round(0.65 + 0.25 * centred, 3)
     # The ball reached the rim area but did not pass cleanly through it.
     return False, 0.6 if above else 0.4
 
